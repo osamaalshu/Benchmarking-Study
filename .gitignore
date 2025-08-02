@@ -46,4 +46,10 @@ venv.bak/
 Thumbs.db
 
 # Logs
-*.log 
+*.log
+
+# Training outputs and checkpoints
+baseline/work_dir/
+*.pth
+*.npz
+events.out.tfevents.* 

@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import monai
 from monai.inferers import sliding_window_inference
-from baseline.models.unetr2d import UNETR2D
+from models.unetr2d import UNETR2D
 import time
 from skimage import io, segmentation, morphology, measure, exposure
 import tifffile as tif
@@ -40,7 +40,7 @@ def main():
     img_names = sorted(os.listdir(join(input_path)))
 
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     if args.model_name.lower() == 'unet':
         model = monai.networks.nets.UNet(
             spatial_dims=2,

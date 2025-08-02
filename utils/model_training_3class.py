@@ -20,8 +20,7 @@ from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric
 from monai.transforms import (
     Activations,
-    AsChannelFirstd,
-    AddChanneld,
+    EnsureChannelFirstd,
     AsDiscrete,
     Compose,
     LoadImaged,
@@ -43,7 +42,12 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import shutil
 
-from baseline.models.unetr2d import UNETR2D
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from models.unetr2d import UNETR2D
+
+
 
 print("Successfully imported all requirements!")
 
@@ -53,7 +57,7 @@ def main():
     # Dataset parameters
     parser.add_argument(
         "--data_path",
-        default="./data/Train_Pre_3class/",
+        default="./data/train-preprocessed/",
         type=str,
         help="training data path; subfolders: images, labels",
     )
@@ -91,26 +95,27 @@ def main():
     shutil.copyfile(
         __file__, join(model_path, run_id + "_" + os.path.basename(__file__))
     )
-    img_path = join(args.data_path, "images")
-    gt_path = join(args.data_path, "labels")
+    # Training data
+    train_img_path = join(args.data_path, "images")
+    train_gt_path = join(args.data_path, "labels")
+    
+    # Validation data (separate folder)
+    val_img_path = join(args.data_path.replace("train-preprocessed", "val"), "images")
+    val_gt_path = join(args.data_path.replace("train-preprocessed", "val"), "labels")
 
-    img_names = sorted(os.listdir(img_path))
-    gt_names = [img_name.split(".")[0] + "_label.png" for img_name in img_names]
-    img_num = len(img_names)
-    val_frac = 0.1
-    indices = np.arange(img_num)
-    np.random.shuffle(indices)
-    val_split = int(img_num * val_frac)
-    train_indices = indices[val_split:]
-    val_indices = indices[:val_split]
+    train_img_names = sorted(os.listdir(train_img_path))
+    train_gt_names = [img_name.split(".")[0] + "_label.png" for img_name in train_img_names]
+    
+    val_img_names = sorted(os.listdir(val_img_path))
+    val_gt_names = [img_name.split(".")[0] + "_label.png" for img_name in val_img_names]
 
     train_files = [
-        {"img": join(img_path, img_names[i]), "label": join(gt_path, gt_names[i])}
-        for i in train_indices
+        {"img": join(train_img_path, train_img_names[i]), "label": join(train_gt_path, train_gt_names[i])}
+        for i in range(len(train_img_names))
     ]
     val_files = [
-        {"img": join(img_path, img_names[i]), "label": join(gt_path, gt_names[i])}
-        for i in val_indices
+        {"img": join(val_img_path, val_img_names[i]), "label": join(val_gt_path, val_gt_names[i])}
+        for i in range(len(val_img_names))
     ]
     print(
         f"training image num: {len(train_files)}, validation image num: {len(val_files)}"
@@ -121,10 +126,8 @@ def main():
             LoadImaged(
                 keys=["img", "label"], reader=PILReader, dtype=np.uint8
             ),  # image three channels (H, W, 3); label: (H, W)
-            AddChanneld(keys=["label"], allow_missing_keys=True),  # label: (1, H, W)
-            AsChannelFirstd(
-                keys=["img"], channel_dim=-1, allow_missing_keys=True
-            ),  # image: (3, H, W)
+            EnsureChannelFirstd(keys=["label"], allow_missing_keys=True),  # label: (1, H, W)
+            EnsureChannelFirstd(keys=["img"], allow_missing_keys=True),  # image: (3, H, W)
             ScaleIntensityd(
                 keys=["img"], allow_missing_keys=True
             ),  # Do not scale label
@@ -153,8 +156,8 @@ def main():
     val_transforms = Compose(
         [
             LoadImaged(keys=["img", "label"], reader=PILReader, dtype=np.uint8),
-            AddChanneld(keys=["label"], allow_missing_keys=True),
-            AsChannelFirstd(keys=["img"], channel_dim=-1, allow_missing_keys=True),
+            EnsureChannelFirstd(keys=["label"], allow_missing_keys=True),
+            EnsureChannelFirstd(keys=["img"], allow_missing_keys=True),
             ScaleIntensityd(keys=["img"], allow_missing_keys=True),
             # AsDiscreted(keys=['label'], to_onehot=3),
             EnsureTyped(keys=["img", "label"]),
@@ -196,7 +199,7 @@ def main():
     )
     post_gt = Compose([EnsureType(), AsDiscrete(to_onehot=None)])
     # create UNet, DiceLoss and Adam optimizer
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     if args.model_name.lower() == "unet":
         model = monai.networks.nets.UNet(
             spatial_dims=2,
