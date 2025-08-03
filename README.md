@@ -17,7 +17,8 @@ This project benchmarks different segmentation models on cell microscopy images 
 │   ├── predict.py             # Inference script
 │   └── compute_metric.py      # Evaluation metrics script
 ├── models/
-│   └── unetr2d.py            # UNETR model architecture
+│   ├── unetr2d.py            # UNETR model architecture
+│   └── sac_model.py          # SAC (Segment Any Cell) model using Meta's SAM
 ├── baseline/
 │   └── work_dir/             # Training outputs and checkpoints
 └── notebooks/
@@ -58,6 +59,9 @@ python utils/model_training_3class.py --model_name unetr --batch_size 4 --max_ep
 
 # Train SwinUNETR model
 python utils/model_training_3class.py --model_name swinunetr --batch_size 2 --max_epochs 30
+
+# Train SAC model (Segment Any Cell using Meta's SAM)
+python utils/model_training_3class.py --model_name sac --batch_size 2 --max_epochs 30
 ```
 
 ### 4. Monitor Training
@@ -89,7 +93,7 @@ python utils/compute_metric.py -g ./data/test/labels -s ./results --gt_suffix .t
 
 | Parameter        | Default | Description                                        |
 | ---------------- | ------- | -------------------------------------------------- |
-| `--model_name`   | `unet`  | Model type: `unet`, `unetr`, `swinunetr`           |
+| `--model_name`   | `unet`  | Model type: `unet`, `unetr`, `swinunetr`, `sac`    |
 | `--batch_size`   | `8`     | Batch size per GPU                                 |
 | `--max_epochs`   | `2000`  | Maximum training epochs                            |
 | `--initial_lr`   | `6e-4`  | Learning rate                                      |
@@ -118,6 +122,7 @@ python utils/compute_metric.py -g ./data/test/labels -s ./results --gt_suffix .t
 1. **UNet**: Standard U-Net with residual connections
 2. **UNETR**: Vision Transformer-based U-Net
 3. **SwinUNETR**: Swin Transformer-based U-Net
+4. **SAC**: Segment Any Cell model using Meta's SAM with CAM architecture - uses SAM's image encoder as feature extractor with custom decoder head
 
 ### Data Preprocessing
 

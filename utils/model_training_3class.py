@@ -46,6 +46,7 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from models.unetr2d import UNETR2D
+from models.sac_model import SACModel, create_default_points
 
 
 
@@ -234,6 +235,10 @@ def main():
             spatial_dims=2,
         ).to(device)
 
+    if args.model_name.lower() == "sac":
+        model = SACModel(device=device, num_classes=args.num_class, freeze_encoder_layers=6)
+        # Note: SACModel handles device internally and has its own decoder head
+
     loss_function = monai.losses.DiceCELoss(softmax=True)
     initial_lr = args.initial_lr
     optimizer = torch.optim.AdamW(model.parameters(), initial_lr)
@@ -255,7 +260,16 @@ def main():
                 device
             )
             optimizer.zero_grad()
-            outputs = model(inputs)
+            
+            # Handle SAC model differently (requires points)
+            if args.model_name.lower() == "sac":
+                batch_size = inputs.shape[0]
+                points = create_default_points(batch_size, (args.input_size, args.input_size))
+                points = points.to(device)
+                outputs = model(inputs, points=points)
+            else:
+                outputs = model(inputs)
+                
             labels_onehot = monai.networks.one_hot(
                 labels, args.num_class
             )  # (b,cls,256,256)
@@ -291,20 +305,24 @@ def main():
                     )
                     roi_size = (256, 256)
                     sw_batch_size = 4
-                    val_outputs = sliding_window_inference(
-                        val_images, roi_size, sw_batch_size, model
-                    )
+                    
+                    # Handle SAC model differently for validation
+                    if args.model_name.lower() == "sac":
+                        batch_size = val_images.shape[0]
+                        points = create_default_points(batch_size, (args.input_size, args.input_size))
+                        points = points.to(device)
+                        val_outputs = model(val_images, points=points)
+                    else:
+                        val_outputs = sliding_window_inference(
+                            val_images, roi_size, sw_batch_size, model
+                        )
                     val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
                     val_labels_onehot = [
                         post_gt(i) for i in decollate_batch(val_labels_onehot)
                     ]
                     # compute metric for current iteration
-                    print(
-                        os.path.basename(
-                            val_data["img_meta_dict"]["filename_or_obj"][0]
-                        ),
-                        dice_metric(y_pred=val_outputs, y=val_labels_onehot),
-                    )
+                    dice_score = dice_metric(y_pred=val_outputs, y=val_labels_onehot)
+                    print(f"Validation batch - Dice score: {dice_score}")
 
                 # aggregate the final mean dice result
                 metric = dice_metric.aggregate().item()
