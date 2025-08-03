@@ -201,9 +201,11 @@ def main():
     )
 
     post_pred = Compose(
-        [EnsureType(), Activations(softmax=True), AsDiscrete(threshold=0.5)]
+        [EnsureType(), Activations(softmax=True), AsDiscrete(argmax=True)]
     )
-    post_gt = Compose([EnsureType(), AsDiscrete(to_onehot=None)])
+
+    
+    post_gt = Compose([EnsureType(), AsDiscrete(to_onehot=3)])
     # create UNet, DiceLoss and Adam optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     if args.model_name.lower() == "unet":
@@ -285,9 +287,12 @@ def main():
             epoch_len = len(train_ds) // train_loader.batch_size
             # print(f"{step}/{epoch_len}, train_loss: {loss.item():.4f}")
             writer.add_scalar("train_loss", loss.item(), epoch_len * epoch + step)
+            writer.flush()  # Force flush to ensure logs are written
         epoch_loss /= step
         epoch_loss_values.append(epoch_loss)
         print(f"epoch {epoch} average loss: {epoch_loss:.4f}")
+        writer.add_scalar("epoch_loss", epoch_loss, epoch)
+        writer.flush()  # Force flush to ensure logs are written
         checkpoint = {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
@@ -341,24 +346,12 @@ def main():
                             val_images, roi_size, sw_batch_size, model
                         )
                     
-                    # Apply post-processing
-                    val_outputs_processed = [post_pred(i) for i in decollate_batch(val_outputs)]
-                    val_labels_onehot_processed = [
-                        post_gt(i) for i in decollate_batch(val_labels_onehot)
-                    ]
+                    # Debug: print raw dimensions
+                    print(f"Raw val_outputs shape: {val_outputs.shape}")
+                    print(f"Raw val_labels_onehot shape: {val_labels_onehot.shape}")
                     
-                    # Debug: print processed dimensions
-                    print(f"Processed output shape: {val_outputs_processed[0].shape}")
-                    print(f"Processed label shape: {val_labels_onehot_processed[0].shape}")
-                    
-                    # Debug: print individual tensor shapes
-                    for i, (out, lab) in enumerate(zip(val_outputs_processed, val_labels_onehot_processed)):
-                        print(f"Tensor {i}: output {out.shape}, label {lab.shape}")
-                        if out.shape != lab.shape:
-                            print(f"  MISMATCH: output {out.shape} vs label {lab.shape}")
-                    
-                    # compute metric for current iteration
-                    dice_score = dice_metric(y_pred=val_outputs_processed, y=val_labels_onehot_processed)
+                    # compute metric for current iteration (pass tensors as is)
+                    dice_score = dice_metric(y_pred=val_outputs, y=val_labels_onehot)
                     print(f"Validation batch {batch_count} - Dice score: {dice_score}")
                     batch_count += 1
 
@@ -378,6 +371,7 @@ def main():
                     )
                 )
                 writer.add_scalar("val_mean_dice", metric, epoch + 1)
+                writer.flush()  # Force flush to ensure logs are written
                 # plot the last model output as GIF image in TensorBoard with the corresponding image and label
                 if val_images is not None and val_outputs is not None:
                     plot_2d_or_3d_image(val_images, epoch, writer, index=0, tag="image")
@@ -394,7 +388,7 @@ def main():
                     os.makedirs(pred_dir, exist_ok=True)
                     
                     # Save predictions for the first validation image
-                    val_pred = val_outputs_processed[0]  # First prediction (processed)
+                    val_pred = val_outputs[0]  # First prediction (raw)
                     val_pred_npy = val_pred.cpu().numpy()
                     
                     # Convert to probability map and instance mask
