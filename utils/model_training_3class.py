@@ -290,7 +290,7 @@ def main():
             "loss": epoch_loss_values,
         }
 
-        if epoch > 20 and epoch % val_interval == 0:
+        if epoch > 10 and epoch % val_interval == 0:
             model.eval()
             with torch.no_grad():
                 val_images = None
