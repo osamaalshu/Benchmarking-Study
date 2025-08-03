@@ -161,7 +161,11 @@ def main():
             EnsureChannelFirstd(keys=["label"], allow_missing_keys=True),
             EnsureChannelFirstd(keys=["img"], allow_missing_keys=True),
             ScaleIntensityd(keys=["img"], allow_missing_keys=True),
-            # AsDiscreted(keys=['label'], to_onehot=3),
+            # Ensure validation images are resized to expected input size
+            SpatialPadd(keys=["img", "label"], spatial_size=args.input_size),
+            RandSpatialCropd(
+                keys=["img", "label"], roi_size=args.input_size, random_size=False
+            ),
             EnsureTyped(keys=["img", "label"]),
         ]
     )
@@ -303,9 +307,17 @@ def main():
                     val_images, val_labels = val_data["img"].to(device), val_data[
                         "label"
                     ].to(device)
+                    
+                    # Debug: print raw label dimensions
+                    print(f"Raw val_images shape: {val_images.shape}")
+                    print(f"Raw val_labels shape: {val_labels.shape}")
+                    
                     val_labels_onehot = monai.networks.one_hot(
                         val_labels, args.num_class
                     )
+                    
+                    # Debug: print one-hot label dimensions
+                    print(f"One-hot val_labels shape: {val_labels_onehot.shape}")
                     roi_size = (256, 256)
                     sw_batch_size = 4
                     
@@ -338,6 +350,12 @@ def main():
                     # Debug: print processed dimensions
                     print(f"Processed output shape: {val_outputs_processed[0].shape}")
                     print(f"Processed label shape: {val_labels_onehot_processed[0].shape}")
+                    
+                    # Debug: print individual tensor shapes
+                    for i, (out, lab) in enumerate(zip(val_outputs_processed, val_labels_onehot_processed)):
+                        print(f"Tensor {i}: output {out.shape}, label {lab.shape}")
+                        if out.shape != lab.shape:
+                            print(f"  MISMATCH: output {out.shape} vs label {lab.shape}")
                     
                     # compute metric for current iteration
                     dice_score = dice_metric(y_pred=val_outputs_processed, y=val_labels_onehot_processed)
