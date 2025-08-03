@@ -81,7 +81,7 @@ def main():
             ).to(device)
 
     if args.model_name.lower() == 'sac':
-        model = SACModel(device=device, num_classes=args.num_class, freeze_encoder_layers=6)
+        model = SACModel(device=device, num_classes=args.num_class, freeze_encoder_layers=6, use_lora=True, lora_rank=16)
         # Note: SACModel handles device internally and has its own decoder head
 
     checkpoint = torch.load(join(args.model_path, 'best_Dice_model.pth'), map_location=torch.device(device))

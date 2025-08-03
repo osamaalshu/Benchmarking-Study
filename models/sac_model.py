@@ -224,15 +224,10 @@ class SACModel(nn.Module):
         
         x = self.conv5(x)
         
-        # Apply softmax for multi-class segmentation
-        if self.num_classes > 1:
-            x = F.softmax(x, dim=1)
-        else:
-            x = torch.sigmoid(x)
-        
         # Resize to original input size (256x256)
         x = F.interpolate(x, size=(256, 256), mode='bilinear', align_corners=False)
         
+        # Return raw logits (softmax/sigmoid will be applied during inference)
         return x
     
     def predict_instance_masks(self, x: torch.Tensor) -> List[np.ndarray]:
@@ -247,6 +242,11 @@ class SACModel(nn.Module):
             # Get prediction
             with torch.no_grad():
                 pred = self.forward(img)
+                # Apply softmax/sigmoid for inference
+                if self.num_classes > 1:
+                    pred = F.softmax(pred, dim=1)
+                else:
+                    pred = torch.sigmoid(pred)
             
             # Convert to instance mask
             if self.num_classes > 1:

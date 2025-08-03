@@ -236,7 +236,7 @@ def main():
         ).to(device)
 
     if args.model_name.lower() == "sac":
-        model = SACModel(device=device, num_classes=args.num_class, freeze_encoder_layers=6)
+        model = SACModel(device=device, num_classes=args.num_class, freeze_encoder_layers=6, use_lora=True, lora_rank=16)
         # Note: SACModel handles device internally and has its own decoder head
 
     loss_function = monai.losses.DiceCELoss(softmax=True)
@@ -344,6 +344,34 @@ def main():
                 plot_2d_or_3d_image(val_images, epoch, writer, index=0, tag="image")
                 plot_2d_or_3d_image(val_labels, epoch, writer, index=0, tag="label")
                 plot_2d_or_3d_image(val_outputs, epoch, writer, index=0, tag="output")
+                
+                # Save SAC model predictions during validation
+                if args.model_name.lower() == "sac":
+                    import tifffile as tif
+                    from skimage import measure, morphology
+                    
+                    # Create prediction directory
+                    pred_dir = join(model_path, "predictions")
+                    os.makedirs(pred_dir, exist_ok=True)
+                    
+                    # Save predictions for the first validation image
+                    val_pred = val_outputs[0]  # First prediction
+                    val_pred_npy = val_pred.cpu().numpy()
+                    
+                    # Convert to probability map and instance mask
+                    if val_pred_npy.shape[0] > 1:  # Multi-class
+                        prob_map = val_pred_npy[1]  # Class 1 probability
+                    else:  # Binary
+                        prob_map = val_pred_npy[0]
+                    
+                    # Create instance mask
+                    pred_mask = measure.label(morphology.remove_small_objects(
+                        morphology.remove_small_holes(prob_map > 0.5), 16))
+                    
+                    # Save files
+                    tif.imwrite(join(pred_dir, f"epoch_{epoch}_prob_map.tiff"), prob_map, compression='zlib')
+                    tif.imwrite(join(pred_dir, f"epoch_{epoch}_pred_mask.tiff"), pred_mask, compression='zlib')
+                    print(f"Saved SAC predictions for epoch {epoch}")
             if (epoch - best_metric_epoch) > epoch_tolerance:
                 print(
                     f"validation metric does not improve for {epoch_tolerance} epochs! current {epoch=}, {best_metric_epoch=}"
