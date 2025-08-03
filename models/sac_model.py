@@ -107,6 +107,9 @@ class SACModel(nn.Module):
         # Final output layer for multi-class segmentation
         self.conv5 = nn.ConvTranspose2d(16, num_classes, kernel_size=1, stride=1, padding=0)
         
+        # Feature projection layer (SAM ViT-B has 768 dimensions, we need 256)
+        self.feature_projection = nn.Conv2d(768, 256, kernel_size=1)
+        
         # Image size for SAM
         self.image_size = self.sam.image_encoder.img_size
         
@@ -202,6 +205,14 @@ class SACModel(nn.Module):
             # Note: LoRA adapters are applied within the transformer blocks
         else:
             features = self.sam_encoder(x_preprocessed)
+        
+        # SAM encoder outputs (B, embed_dim, H, W) - need to reshape
+        B, embed_dim, H, W = features.shape
+        
+        # Reshape features to match decoder input dimensions
+        # SAM ViT-B has embed_dim=768, we need to project to 256
+        if embed_dim != 256:
+            features = self.feature_projection(features)
         
         # Decode features using custom decoder head
         x = self.conv1(features)
