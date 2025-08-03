@@ -91,7 +91,7 @@ class SACModel(nn.Module):
         # Custom decoder head (similar to train.py CAM)
         self.nn_drop = nn.Dropout(p=0.2)
         
-        # Decoder layers
+        # Decoder layers - adjusted to produce correct output size
         self.conv1 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2, padding=0)
         self.norm1 = LayerNorm2d(128)
         
@@ -101,11 +101,8 @@ class SACModel(nn.Module):
         self.conv3 = nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2, padding=0)
         self.norm3 = LayerNorm2d(32)
         
-        self.conv4 = nn.ConvTranspose2d(32, 16, kernel_size=2, stride=2, padding=0)
-        self.norm4 = LayerNorm2d(16)
-        
         # Final output layer for multi-class segmentation
-        self.conv5 = nn.ConvTranspose2d(16, num_classes, kernel_size=1, stride=1, padding=0)
+        self.conv4 = nn.Conv2d(32, num_classes, kernel_size=1, stride=1, padding=0)
         
         # Feature projection layer (SAM ViT-B has 768 dimensions, we need 256)
         self.feature_projection = nn.Conv2d(768, 256, kernel_size=1)
@@ -230,10 +227,6 @@ class SACModel(nn.Module):
         x = self.nn_drop(x)
         
         x = self.conv4(x)
-        x = self.norm4(x)
-        x = F.relu(x)
-        
-        x = self.conv5(x)
         
         # Resize to original input size (256x256)
         x = F.interpolate(x, size=(256, 256), mode='bilinear', align_corners=False)

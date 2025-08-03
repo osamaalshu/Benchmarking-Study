@@ -11,6 +11,7 @@ join = os.path.join
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
@@ -290,12 +291,14 @@ def main():
             "loss": epoch_loss_values,
         }
 
-        if epoch > 10 and epoch % val_interval == 0:
+        if epoch % val_interval == 0:
             model.eval()
             with torch.no_grad():
+                # Initialize validation variables
                 val_images = None
                 val_labels = None
                 val_outputs = None
+                batch_count = 0
                 for val_data in val_loader:
                     val_images, val_labels = val_data["img"].to(device), val_data[
                         "label"
@@ -312,17 +315,34 @@ def main():
                         points = create_default_points(batch_size, (args.input_size, args.input_size))
                         points = points.to(device)
                         val_outputs = model(val_images, points=points)
+                        
+                        # Debug: print output dimensions
+                        print(f"SAC output shape: {val_outputs.shape}")
+                        print(f"Expected shape: ({batch_size}, {args.num_class}, 256, 256)")
+                        
+                        # Ensure output is the correct size
+                        if val_outputs.shape[-2:] != (256, 256):
+                            val_outputs = F.interpolate(val_outputs, size=(256, 256), mode='bilinear', align_corners=False)
+                            print(f"Resized SAC output to: {val_outputs.shape}")
                     else:
                         val_outputs = sliding_window_inference(
                             val_images, roi_size, sw_batch_size, model
                         )
-                    val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
-                    val_labels_onehot = [
+                    
+                    # Apply post-processing
+                    val_outputs_processed = [post_pred(i) for i in decollate_batch(val_outputs)]
+                    val_labels_onehot_processed = [
                         post_gt(i) for i in decollate_batch(val_labels_onehot)
                     ]
+                    
+                    # Debug: print processed dimensions
+                    print(f"Processed output shape: {val_outputs_processed[0].shape}")
+                    print(f"Processed label shape: {val_labels_onehot_processed[0].shape}")
+                    
                     # compute metric for current iteration
-                    dice_score = dice_metric(y_pred=val_outputs, y=val_labels_onehot)
-                    print(f"Validation batch - Dice score: {dice_score}")
+                    dice_score = dice_metric(y_pred=val_outputs_processed, y=val_labels_onehot_processed)
+                    print(f"Validation batch {batch_count} - Dice score: {dice_score}")
+                    batch_count += 1
 
                 # aggregate the final mean dice result
                 metric = dice_metric.aggregate().item()
@@ -341,9 +361,10 @@ def main():
                 )
                 writer.add_scalar("val_mean_dice", metric, epoch + 1)
                 # plot the last model output as GIF image in TensorBoard with the corresponding image and label
-                plot_2d_or_3d_image(val_images, epoch, writer, index=0, tag="image")
-                plot_2d_or_3d_image(val_labels, epoch, writer, index=0, tag="label")
-                plot_2d_or_3d_image(val_outputs, epoch, writer, index=0, tag="output")
+                if val_images is not None and val_outputs is not None:
+                    plot_2d_or_3d_image(val_images, epoch, writer, index=0, tag="image")
+                    plot_2d_or_3d_image(val_labels, epoch, writer, index=0, tag="label")
+                    plot_2d_or_3d_image(val_outputs, epoch, writer, index=0, tag="output")
                 
                 # Save SAC model predictions during validation
                 if args.model_name.lower() == "sac":
@@ -355,7 +376,7 @@ def main():
                     os.makedirs(pred_dir, exist_ok=True)
                     
                     # Save predictions for the first validation image
-                    val_pred = val_outputs[0]  # First prediction
+                    val_pred = val_outputs_processed[0]  # First prediction (processed)
                     val_pred_npy = val_pred.cpu().numpy()
                     
                     # Convert to probability map and instance mask
