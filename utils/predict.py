@@ -10,6 +10,7 @@ import monai
 from monai.inferers import sliding_window_inference
 from models.unetr2d import UNETR2D
 from models.sac_model import SACModel, create_default_points
+from models.nnunet import create_nnunet_model
 import time
 from skimage import io, segmentation, morphology, measure, exposure
 import tifffile as tif
@@ -32,7 +33,7 @@ def main():
     parser.add_argument('--show_overlay', required=False, default=False, action="store_true", help='save segmentation overlay')
 
     # Model parameters
-    parser.add_argument('--model_name', default='swinunetr', help='select mode: unet, unetr, swinunetr')
+    parser.add_argument('--model_name', default='swinunetr', help='select mode: unet, unetr, swinunetr, sac, nnunet')
     parser.add_argument('--num_class', default=3, type=int, help='segmentation classes')
     parser.add_argument('--input_size', default=256, type=int, help='segmentation classes')
     args = parser.parse_args()
@@ -84,6 +85,14 @@ def main():
         model = SACModel(device=device, num_classes=args.num_class, freeze_encoder_layers=6, use_lora=True, lora_rank=16)
         # Note: SACModel handles device internally and has its own decoder head
 
+    if args.model_name.lower() == 'nnunet':
+        model = create_nnunet_model(
+            image_size=(args.input_size, args.input_size),
+            in_channels=3,
+            out_channels=args.num_class,
+            gpu_memory_gb=8.0
+        ).to(device)
+
     checkpoint = torch.load(join(args.model_path, 'best_Dice_model.pth'), map_location=torch.device(device))
     model.load_state_dict(checkpoint['model_state_dict'])
     #%%
@@ -120,7 +129,11 @@ def main():
                 points = create_default_points(batch_size, (args.input_size, args.input_size))
                 points = points.to(device)
                 test_pred_out = model(test_tensor, points=points)
+                # SAC model outputs 256x256, need to resize to original image size
+                original_size = (test_tensor.shape[2], test_tensor.shape[3])
+                test_pred_out = torch.nn.functional.interpolate(test_pred_out, size=original_size, mode='bilinear', align_corners=False)
             else:
+                # Use sliding window inference for UNet, UNetR, SwinUNetR, and nnU-Net
                 test_pred_out = sliding_window_inference(test_tensor, roi_size, sw_batch_size, model)
                 
             test_pred_out = torch.nn.functional.softmax(test_pred_out, dim=1) # (B, C, H, W)

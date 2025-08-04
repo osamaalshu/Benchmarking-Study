@@ -48,6 +48,8 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from models.unetr2d import UNETR2D
 from models.sac_model import SACModel, create_default_points
+from models.nnunet import create_nnunet_model
+from models.lstmunet import create_lstmunet_model
 
 
 
@@ -72,7 +74,7 @@ def main():
 
     # Model parameters
     parser.add_argument(
-        "--model_name", default="unet", help="select mode: unet, unetr, swinunetr"
+        "--model_name", default="unet", help="select mode: unet, unetr, swinunetr, sac, nnunet, lstmunet"
     )
     parser.add_argument("--num_class", default=3, type=int, help="segmentation classes")
     parser.add_argument(
@@ -82,7 +84,7 @@ def main():
     parser.add_argument("--batch_size", default=8, type=int, help="Batch size per GPU")
     parser.add_argument("--max_epochs", default=2000, type=int)
     parser.add_argument("--val_interval", default=2, type=int)
-    parser.add_argument("--epoch_tolerance", default=100, type=int)
+    parser.add_argument("--epoch_tolerance", default=10, type=int)
     parser.add_argument("--initial_lr", type=float, default=6e-4, help="learning rate")
 
     args = parser.parse_args()
@@ -190,7 +192,7 @@ def main():
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
-        pin_memory=torch.cuda.is_available(),
+        pin_memory=torch.cuda.is_available() or torch.backends.mps.is_available(),
     )
     # create a validation data loader
     val_ds = monai.data.Dataset(data=val_files, transform=val_transforms)
@@ -201,13 +203,18 @@ def main():
     )
 
     post_pred = Compose(
-        [EnsureType(), Activations(softmax=True), AsDiscrete(argmax=True)]
+        [EnsureType(), Activations(softmax=True), AsDiscrete(threshold=0.5)]
     )
-
-    
-    post_gt = Compose([EnsureType(), AsDiscrete(to_onehot=3)])
+    post_gt = Compose([EnsureType(), AsDiscrete(to_onehot=None)])
     # create UNet, DiceLoss and Adam optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    print(f"Using device: {device}")
+    if device.type == "mps":
+        print("✅ Training on Apple Silicon GPU (MPS)")
+    elif device.type == "cuda":
+        print("✅ Training on NVIDIA GPU (CUDA)")
+    else:
+        print("⚠️  Training on CPU")
     if args.model_name.lower() == "unet":
         model = monai.networks.nets.UNet(
             spatial_dims=2,
@@ -245,6 +252,26 @@ def main():
     if args.model_name.lower() == "sac":
         model = SACModel(device=device, num_classes=args.num_class, freeze_encoder_layers=6, use_lora=True, lora_rank=16)
         # Note: SACModel handles device internally and has its own decoder head
+
+    if args.model_name.lower() == "nnunet":
+        model = create_nnunet_model(
+            image_size=(args.input_size, args.input_size),
+            in_channels=3,
+            out_channels=args.num_class,
+            gpu_memory_gb=8.0
+        ).to(device)
+
+    if args.model_name.lower() == "lstmunet":
+        model = create_lstmunet_model(
+            image_size=(args.input_size, args.input_size),
+            in_channels=3,
+            out_channels=args.num_class,
+            base_filters=64,
+            depth=4,
+            lstm_hidden_channels=64,
+            lstm_layers=2,
+            dropout_rate=0.1
+        ).to(device)
 
     loss_function = monai.losses.DiceCELoss(softmax=True)
     initial_lr = args.initial_lr
@@ -300,30 +327,23 @@ def main():
             "loss": epoch_loss_values,
         }
 
-        if epoch % val_interval == 0:
+        if epoch > 20 and epoch % val_interval == 0:
             model.eval()
             with torch.no_grad():
                 # Initialize validation variables
                 val_images = None
                 val_labels = None
                 val_outputs = None
-                batch_count = 0
                 for val_data in val_loader:
                     val_images, val_labels = val_data["img"].to(device), val_data[
                         "label"
                     ].to(device)
                     
-                    # Debug: print raw label dimensions
-                    print(f"Raw val_images shape: {val_images.shape}")
-                    print(f"Raw val_labels shape: {val_labels.shape}")
-                    
                     val_labels_onehot = monai.networks.one_hot(
                         val_labels, args.num_class
                     )
                     
-                    # Debug: print one-hot label dimensions
-                    print(f"One-hot val_labels shape: {val_labels_onehot.shape}")
-                    roi_size = (256, 256)
+                    roi_size = (args.input_size, args.input_size)
                     sw_batch_size = 4
                     
                     # Handle SAC model differently for validation
@@ -333,27 +353,26 @@ def main():
                         points = points.to(device)
                         val_outputs = model(val_images, points=points)
                         
-                        # Debug: print output dimensions
-                        print(f"SAC output shape: {val_outputs.shape}")
-                        print(f"Expected shape: ({batch_size}, {args.num_class}, 256, 256)")
-                        
                         # Ensure output is the correct size
-                        if val_outputs.shape[-2:] != (256, 256):
-                            val_outputs = F.interpolate(val_outputs, size=(256, 256), mode='bilinear', align_corners=False)
-                            print(f"Resized SAC output to: {val_outputs.shape}")
+                        if val_outputs.shape[-2:] != (args.input_size, args.input_size):
+                            val_outputs = F.interpolate(val_outputs, size=(args.input_size, args.input_size), mode='bilinear', align_corners=False)
+                    elif args.model_name.lower() == "nnunet":
+                        # nnU-Net can handle full images directly
+                        val_outputs = model(val_images)
                     else:
                         val_outputs = sliding_window_inference(
                             val_images, roi_size, sw_batch_size, model
                         )
                     
-                    # Debug: print raw dimensions
-                    print(f"Raw val_outputs shape: {val_outputs.shape}")
-                    print(f"Raw val_labels_onehot shape: {val_labels_onehot.shape}")
+                    # Apply post-processing transforms
+                    val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
+                    val_labels_onehot = [post_gt(i) for i in decollate_batch(val_labels_onehot)]
                     
-                    # compute metric for current iteration (pass tensors as is)
-                    dice_score = dice_metric(y_pred=val_outputs, y=val_labels_onehot)
-                    print(f"Validation batch {batch_count} - Dice score: {dice_score}")
-                    batch_count += 1
+                    # compute metric for current iteration
+                    print(
+                        f"Validation batch {len(metric_values) + 1}",
+                        dice_metric(y_pred=val_outputs, y=val_labels_onehot),
+                    )
 
                 # aggregate the final mean dice result
                 metric = dice_metric.aggregate().item()
@@ -378,8 +397,8 @@ def main():
                     plot_2d_or_3d_image(val_labels, epoch, writer, index=0, tag="label")
                     plot_2d_or_3d_image(val_outputs, epoch, writer, index=0, tag="output")
                 
-                # Save SAC model predictions during validation
-                if args.model_name.lower() == "sac":
+                # Save SAC and nnU-Net model predictions during validation
+                if args.model_name.lower() in ["sac", "nnunet"]:
                     import tifffile as tif
                     from skimage import measure, morphology
                     
@@ -404,7 +423,7 @@ def main():
                     # Save files
                     tif.imwrite(join(pred_dir, f"epoch_{epoch}_prob_map.tiff"), prob_map, compression='zlib')
                     tif.imwrite(join(pred_dir, f"epoch_{epoch}_pred_mask.tiff"), pred_mask, compression='zlib')
-                    print(f"Saved SAC predictions for epoch {epoch}")
+                    print(f"Saved {args.model_name} predictions for epoch {epoch}")
             if (epoch - best_metric_epoch) > epoch_tolerance:
                 print(
                     f"validation metric does not improve for {epoch_tolerance} epochs! current {epoch=}, {best_metric_epoch=}"

@@ -11,3 +11,12 @@ psutil
 pandas
 einops
 tifffile
+# nnU-Net dependencies
+nnunetv2
+batchgenerators
+SimpleITK
+scipy
+opencv-python
+numpy>=1.21.0
+torch>=1.9.0
+torchvision>=0.10.0
