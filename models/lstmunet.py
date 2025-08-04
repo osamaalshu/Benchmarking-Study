@@ -91,8 +91,11 @@ class ConvLSTM2DCell(nn.Module):
         
         # Initialize hidden state if not provided
         if hidden_state is None or hidden_state[0] is None or hidden_state[1] is None:
-            h_prev = torch.zeros(batch_size, self.hidden_channels, height, width, device=x.device, dtype=x.dtype)
-            c_prev = torch.zeros(batch_size, self.hidden_channels, height, width, device=x.device, dtype=x.dtype)
+            # Ensure device compatibility for Colab (CUDA/MPS/CPU)
+            device = x.device
+            dtype = x.dtype
+            h_prev = torch.zeros(batch_size, self.hidden_channels, height, width, device=device, dtype=dtype)
+            c_prev = torch.zeros(batch_size, self.hidden_channels, height, width, device=device, dtype=dtype)
         else:
             h_prev, c_prev = hidden_state
         
@@ -247,6 +250,16 @@ class LSTMUNet(nn.Module):
             self.filters.append(self.filters[-1] * 2)
         
         print(f"LSTM-UNet filters: {self.filters}")
+        
+        # Print device information
+        device = get_device()
+        print(f"LSTM-UNet will use device: {device}")
+        if device.type == "cuda":
+            print(f"✅ CUDA GPU: {torch.cuda.get_device_name()}")
+        elif device.type == "mps":
+            print("✅ Apple Silicon GPU (MPS)")
+        else:
+            print("⚠️  CPU (no GPU acceleration)")
         
         # Encoder (downsampling path)
         self.encoder = nn.ModuleList()
@@ -433,6 +446,15 @@ class LSTMUNet(nn.Module):
         
         return final_output
 
+
+def get_device():
+    """Get the best available device (CUDA > MPS > CPU)"""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
 
 def create_lstmunet_model(image_size: Tuple[int, int], 
                          in_channels: int = 3,
