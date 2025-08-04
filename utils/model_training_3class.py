@@ -86,6 +86,8 @@ def main():
     parser.add_argument("--val_interval", default=2, type=int)
     parser.add_argument("--epoch_tolerance", default=10, type=int)
     parser.add_argument("--initial_lr", type=float, default=6e-4, help="learning rate")
+    parser.add_argument("--load_checkpoint", action="store_true", help="Load from checkpoint")
+    parser.add_argument("--checkpoint_path", type=str, help="Path to checkpoint file")
 
     args = parser.parse_args()
 
@@ -277,6 +279,21 @@ def main():
     initial_lr = args.initial_lr
     optimizer = torch.optim.AdamW(model.parameters(), initial_lr)
 
+    # Load checkpoint if specified
+    start_epoch = 1
+    if args.load_checkpoint and args.checkpoint_path:
+        if os.path.exists(args.checkpoint_path):
+            print(f"Loading checkpoint from: {args.checkpoint_path}")
+            checkpoint = torch.load(args.checkpoint_path, map_location=device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            start_epoch = checkpoint['epoch'] + 1
+            epoch_loss_values = checkpoint.get('loss', [])
+            print(f"Resuming from epoch {start_epoch}")
+        else:
+            print(f"Checkpoint not found: {args.checkpoint_path}")
+            print("Starting training from scratch")
+
     # start a typical PyTorch training
     max_epochs = args.max_epochs
     epoch_tolerance = args.epoch_tolerance
@@ -286,7 +303,7 @@ def main():
     epoch_loss_values = list()
     metric_values = list()
     writer = SummaryWriter(model_path)
-    for epoch in range(1, max_epochs):
+    for epoch in range(start_epoch, max_epochs):
         model.train()
         epoch_loss = 0
         for step, batch_data in enumerate(train_loader, 1):
