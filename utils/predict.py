@@ -11,6 +11,7 @@ from monai.inferers import sliding_window_inference
 from models.unetr2d import UNETR2D
 from models.sac_model import SACModel, create_default_points
 from models.nnunet import create_nnunet_model
+from models.lstmunet import create_lstmunet_model
 import time
 from skimage import io, segmentation, morphology, measure, exposure
 import tifffile as tif
@@ -33,7 +34,7 @@ def main():
     parser.add_argument('--show_overlay', required=False, default=False, action="store_true", help='save segmentation overlay')
 
     # Model parameters
-    parser.add_argument('--model_name', default='swinunetr', help='select mode: unet, unetr, swinunetr, sac, nnunet')
+    parser.add_argument('--model_name', default='swinunetr', help='select mode: unet, unetr, swinunetr, sac, nnunet, lstmunet')
     parser.add_argument('--num_class', default=3, type=int, help='segmentation classes')
     parser.add_argument('--input_size', default=256, type=int, help='segmentation classes')
     args = parser.parse_args()
@@ -91,6 +92,18 @@ def main():
             in_channels=3,
             out_channels=args.num_class,
             gpu_memory_gb=8.0
+        ).to(device)
+
+    if args.model_name.lower() == 'lstmunet':
+        model = create_lstmunet_model(
+            image_size=(args.input_size, args.input_size),
+            in_channels=3,
+            out_channels=args.num_class,
+            base_filters=64,
+            depth=4,
+            lstm_hidden_channels=64,
+            lstm_layers=2,
+            dropout_rate=0.1
         ).to(device)
 
     checkpoint = torch.load(join(args.model_path, 'best_Dice_model.pth'), map_location=torch.device(device))
