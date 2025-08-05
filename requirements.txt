@@ -9,7 +9,7 @@ torchVision
 tqdm
 psutil
 pandas
-einops
+einops>=0.6.0
 tifffile
 # nnU-Net dependencies
 nnunetv2

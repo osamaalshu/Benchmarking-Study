@@ -12,6 +12,7 @@ from models.unetr2d import UNETR2D
 from models.sac_model import SACModel, create_default_points
 from models.nnunet import create_nnunet_model
 from models.lstmunet import create_lstmunet_model
+from models.maunet import create_maunet_model
 import time
 from skimage import io, segmentation, morphology, measure, exposure
 import tifffile as tif
@@ -25,45 +26,6 @@ def normalize_channel(img, lower=1, upper=99):
         img_norm = img
     return img_norm.astype(np.uint8)
 
-def improved_post_processing(prob_map, threshold=0.7, min_size=50, max_size=10000):
-    """
-    Improved post-processing for better instance segmentation
-    """
-    # Apply higher threshold to reduce false positives
-    binary_mask = prob_map > threshold
-    
-    # Remove small objects and holes
-    binary_mask = morphology.remove_small_objects(binary_mask, min_size=min_size)
-    binary_mask = morphology.remove_small_holes(binary_mask, area_threshold=min_size)
-    
-    # Apply morphological closing to connect nearby regions
-    selem = morphology.disk(2)
-    binary_mask = morphology.binary_closing(binary_mask, selem)
-    
-    # Apply morphological opening to remove noise
-    selem = morphology.disk(1)
-    binary_mask = morphology.binary_opening(binary_mask, selem)
-    
-    # Label connected components
-    labeled_mask = measure.label(binary_mask, connectivity=2)
-    
-    # Remove very large objects (likely artifacts)
-    if np.max(labeled_mask) > 0:
-        props = measure.regionprops(labeled_mask)
-        valid_labels = []
-        for prop in props:
-            if min_size <= prop.area <= max_size:
-                valid_labels.append(prop.label)
-        
-        # Create new mask with only valid objects
-        final_mask = np.zeros_like(labeled_mask)
-        for label in valid_labels:
-            final_mask[labeled_mask == label] = label
-    else:
-        final_mask = labeled_mask
-    
-    return final_mask
-
 def main():
     parser = argparse.ArgumentParser('Baseline for Microscopy image segmentation', add_help=False)
     # Dataset parameters
@@ -73,10 +35,9 @@ def main():
     parser.add_argument('--show_overlay', required=False, default=False, action="store_true", help='save segmentation overlay')
 
     # Model parameters
-    parser.add_argument('--model_name', default='swinunetr', help='select mode: unet, unetr, swinunetr, sac, nnunet, lstmunet')
+    parser.add_argument('--model_name', default='swinunetr', help='select mode: unet, unetr, swinunetr, sac, nnunet, lstmunet, maunet')
     parser.add_argument('--num_class', default=3, type=int, help='segmentation classes')
     parser.add_argument('--input_size', default=256, type=int, help='segmentation classes')
-    parser.add_argument('--threshold', default=0.7, type=float, help='threshold for post-processing')
     args = parser.parse_args()
 
     input_path = args.input_path
@@ -146,6 +107,17 @@ def main():
             dropout_rate=0.1
         ).to(device)
 
+    if args.model_name.lower() == 'maunet':
+        # MAUNet can use either resnet50 or wide_resnet50 backbone
+        # Check if model path contains wide_resnet to determine backbone
+        backbone = 'wide_resnet50' if 'wide' in args.model_path else 'resnet50'
+        model = create_maunet_model(
+            num_classes=args.num_class,
+            input_size=args.input_size,
+            in_channels=3,
+            backbone=backbone
+        ).to(device)
+
     checkpoint = torch.load(join(args.model_path, 'best_Dice_model.pth'), map_location=torch.device(device))
     model.load_state_dict(checkpoint['model_state_dict'])
     #%%
@@ -187,21 +159,23 @@ def main():
                 test_pred_out = torch.nn.functional.interpolate(test_pred_out, size=original_size, mode='bilinear', align_corners=False)
             else:
                 # Use sliding window inference for UNet, UNetR, SwinUNetR, and nnU-Net
-                test_pred_out = sliding_window_inference(test_tensor, roi_size, sw_batch_size, model)
+                if args.model_name.lower() == 'maunet':
+                    # MAUNet returns two outputs: segmentation and distance transform
+                    # Create a wrapper to handle dual outputs
+                    def maunet_predictor(x):
+                        seg_out, _ = model(x)  # Ignore distance transform output during inference
+                        return seg_out
+                    test_pred_out = sliding_window_inference(test_tensor, roi_size, sw_batch_size, maunet_predictor)
+                else:
+                    test_pred_out = sliding_window_inference(test_tensor, roi_size, sw_batch_size, model)
                 
             test_pred_out = torch.nn.functional.softmax(test_pred_out, dim=1) # (B, C, H, W)
             test_pred_npy = test_pred_out[0,1].cpu().numpy()
-            
-            # Use improved post-processing
-            test_pred_mask = improved_post_processing(test_pred_npy, threshold=args.threshold)
-            
-            # Save prediction
+            # convert probability map to binary mask and apply morphological postprocessing
+            test_pred_mask = measure.label(morphology.remove_small_objects(morphology.remove_small_holes(test_pred_npy>0.5),16))
             tif.imwrite(join(output_path, img_name.split('.')[0]+'_label.tiff'), test_pred_mask, compression='zlib')
             t1 = time.time()
-            
-            # Print statistics
-            num_cells = np.max(test_pred_mask)
-            print(f'Prediction finished: {img_name}; img size = {pre_img_data.shape}; cells = {num_cells}; costing: {t1-t0:.2f}s')
+            print(f'Prediction finished: {img_name}; img size = {pre_img_data.shape}; costing: {t1-t0:.2f}s')
             
             if args.show_overlay:
                 boundary = segmentation.find_boundaries(test_pred_mask, connectivity=1, mode='inner')
