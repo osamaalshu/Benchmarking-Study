@@ -1,0 +1,6 @@
+Model,Architecture,Total Epochs,Final Loss,Best Validation Dice,Best Epoch,Training Status
+UNet,U-Net with ResNet blocks,58,0.7364,0.6130,13,Completed
+nnU-Net,nnU-Net (No New U-Net),70,0.5406,0.6700,7,Completed
+SAC,Segment Anything + Custom Head,52,1.3622,0.2128,10,Completed
+LSTM-UNet,U-Net with LSTM layers,39,0.9203,0.5898,14,Completed
+MAUNet,MAU-Net with ResNet50 backbone,N/A,N/A,N/A,N/A,Training logs unavailable

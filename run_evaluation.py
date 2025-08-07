@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+import shutil
 
 def run_prediction(model_name, model_path, input_path, output_path):
     """Run prediction for a specific model"""
@@ -49,6 +50,8 @@ def run_metrics(gt_path, seg_path, output_path, model_name):
         "--seg_path", seg_path,
         "--output_path", output_path,
         "--save_name", f"{model_name}_metrics",
+        "--gt_suffix", "_label.tiff",
+        "--seg_suffix", "_label.tiff",
         "--thresholds", "0.5", "0.7", "0.9"
     ]
     
@@ -70,6 +73,11 @@ def main():
     test_gt_path = "./data/test/labels"
     base_output_path = "./test_predictions"
     
+    # Clean up output directory
+    if os.path.exists(base_output_path):
+        shutil.rmtree(base_output_path)
+    os.makedirs(base_output_path, exist_ok=True)
+    
     # Models to evaluate
     models = [
         {
@@ -87,6 +95,10 @@ def main():
         {
             "name": "lstmunet",
             "path": "./baseline/work_dir/lstmunet_3class"
+        },
+        {
+            "name": "maunet",
+            "path": "./baseline/work_dir/maunet_3class/maunet_resnet50"
         }
     ]
     

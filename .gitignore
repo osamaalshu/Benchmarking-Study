@@ -52,4 +52,16 @@ Thumbs.db
 baseline/work_dir/
 *.pth
 *.npz
-events.out.tfevents.* 
+events.out.tfevents.*
+
+# Image files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.tif
+*.svg
+*.ico
+*.webp 
