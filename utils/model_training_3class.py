@@ -46,10 +46,10 @@ import shutil
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from models.unetr2d import UNETR2D
 from models.sac_model import SACModel, create_default_points
 from models.nnunet import create_nnunet_model
 from models.lstmunet import create_lstmunet_model
+from models.maunet import create_maunet_model, WeightedL1Loss
 
 
 
@@ -74,7 +74,7 @@ def main():
 
     # Model parameters
     parser.add_argument(
-        "--model_name", default="unet", help="select mode: unet, unetr, swinunetr, sac, nnunet, lstmunet"
+        "--model_name", default="unet", help="select mode: unet, sac, nnunet, lstmunet, maunet"
     )
     parser.add_argument("--num_class", default=3, type=int, help="segmentation classes")
     parser.add_argument(
@@ -227,29 +227,9 @@ def main():
             num_res_units=2,
         ).to(device)
 
-    if args.model_name.lower() == "unetr":
-        model = UNETR2D(
-            in_channels=3,
-            out_channels=args.num_class,
-            img_size=(args.input_size, args.input_size),
-            feature_size=16,
-            hidden_size=768,
-            mlp_dim=3072,
-            num_heads=12,
-            pos_embed="perceptron",
-            norm_name="instance",
-            res_block=True,
-            dropout_rate=0.0,
-        ).to(device)
 
-    if args.model_name.lower() == "swinunetr":
-        model = monai.networks.nets.SwinUNETR(
-            img_size=(args.input_size, args.input_size),
-            in_channels=3,
-            out_channels=args.num_class,
-            feature_size=24,  # should be divisible by 12
-            spatial_dims=2,
-        ).to(device)
+
+
 
     if args.model_name.lower() == "sac":
         model = SACModel(device=device, num_classes=args.num_class, freeze_encoder_layers=6, use_lora=True, lora_rank=16)
@@ -275,7 +255,21 @@ def main():
             dropout_rate=0.1
         ).to(device)
 
-    loss_function = monai.losses.DiceCELoss(softmax=True)
+    if args.model_name.lower() == "maunet":
+        model = create_maunet_model(
+            num_classes=args.num_class,
+            input_size=args.input_size,
+            in_channels=3,
+            backbone="resnet50"
+        ).to(device)
+
+    # Setup loss functions
+    if args.model_name.lower() == "maunet":
+        # MAUNet uses dual loss: DiceCE for classification + WeightedL1 for regression
+        loss_function = monai.losses.DiceCELoss(softmax=True)
+        regression_loss = WeightedL1Loss()
+    else:
+        loss_function = monai.losses.DiceCELoss(softmax=True)
     initial_lr = args.initial_lr
     optimizer = torch.optim.AdamW(model.parameters(), initial_lr)
 
@@ -312,19 +306,33 @@ def main():
             )
             optimizer.zero_grad()
             
-            # Handle SAC model differently (requires points)
+            # Handle different model architectures
             if args.model_name.lower() == "sac":
                 batch_size = inputs.shape[0]
                 points = create_default_points(batch_size, (args.input_size, args.input_size))
                 points = points.to(device)
                 outputs = model(inputs, points=points)
+                labels_onehot = monai.networks.one_hot(labels, args.num_class)
+                loss = loss_function(outputs, labels_onehot)
+            elif args.model_name.lower() == "maunet":
+                # MAUNet returns dual outputs: (classification, regression)
+                outputs, outputs_reg = model(inputs)
+                labels_onehot = monai.networks.one_hot(labels, args.num_class)
+                
+                # Classification loss
+                class_loss = loss_function(outputs, labels_onehot)
+                
+                # Regression loss (distance transform) - need to prepare distance transform target
+                # For now, use simplified approach - can be enhanced with proper distance transform preprocessing
+                dist_target = (labels > 0).float()  # Simple binary mask as distance target
+                reg_loss = regression_loss(outputs_reg, dist_target)
+                
+                # Combined loss
+                loss = class_loss + 0.1 * reg_loss  # Weight regression loss lower
             else:
                 outputs = model(inputs)
-                
-            labels_onehot = monai.networks.one_hot(
-                labels, args.num_class
-            )  # (b,cls,256,256)
-            loss = loss_function(outputs, labels_onehot)
+                labels_onehot = monai.networks.one_hot(labels, args.num_class)
+                loss = loss_function(outputs, labels_onehot)
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
@@ -363,7 +371,7 @@ def main():
                     roi_size = (args.input_size, args.input_size)
                     sw_batch_size = 4
                     
-                    # Handle SAC model differently for validation
+                    # Handle different model architectures for validation
                     if args.model_name.lower() == "sac":
                         batch_size = val_images.shape[0]
                         points = create_default_points(batch_size, (args.input_size, args.input_size))
@@ -376,6 +384,9 @@ def main():
                     elif args.model_name.lower() == "nnunet":
                         # nnU-Net can handle full images directly
                         val_outputs = model(val_images)
+                    elif args.model_name.lower() == "maunet":
+                        # MAUNet returns dual outputs - use only classification output for validation
+                        val_outputs, _ = model(val_images)  # Ignore regression output for validation
                     else:
                         val_outputs = sliding_window_inference(
                             val_images, roi_size, sw_batch_size, model
@@ -414,8 +425,8 @@ def main():
                     plot_2d_or_3d_image(val_labels, epoch, writer, index=0, tag="label")
                     plot_2d_or_3d_image(val_outputs, epoch, writer, index=0, tag="output")
                 
-                # Save SAC and nnU-Net model predictions during validation
-                if args.model_name.lower() in ["sac", "nnunet"]:
+                # Save SAC, nnU-Net, and MAUNet model predictions during validation
+                if args.model_name.lower() in ["sac", "nnunet", "maunet"]:
                     import tifffile as tif
                     from skimage import measure, morphology
                     
