@@ -86,6 +86,9 @@ def main():
     parser.add_argument("--val_interval", default=2, type=int)
     parser.add_argument("--epoch_tolerance", default=10, type=int)
     parser.add_argument("--initial_lr", type=float, default=6e-4, help="learning rate")
+    parser.add_argument("--lr_scheduler", action="store_true", help="Use exponential learning rate scheduler")
+    parser.add_argument("--lr_gamma", type=float, default=0.95, help="Learning rate decay factor")
+    parser.add_argument("--lr_step_size", type=int, default=10, help="Learning rate decay step size")
     parser.add_argument("--load_checkpoint", action="store_true", help="Load from checkpoint")
     parser.add_argument("--checkpoint_path", type=str, help="Path to checkpoint file")
 
@@ -272,6 +275,11 @@ def main():
         loss_function = monai.losses.DiceCELoss(softmax=True)
     initial_lr = args.initial_lr
     optimizer = torch.optim.AdamW(model.parameters(), initial_lr)
+    
+    # Setup learning rate scheduler if requested
+    scheduler = None
+    if args.lr_scheduler:
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step_size, gamma=args.lr_gamma)
 
     # Load checkpoint if specified
     start_epoch = 1
@@ -281,6 +289,8 @@ def main():
             checkpoint = torch.load(args.checkpoint_path, map_location=device)
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if scheduler is not None and 'scheduler_state_dict' in checkpoint and checkpoint['scheduler_state_dict'] is not None:
+                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             start_epoch = checkpoint['epoch'] + 1
             epoch_loss_values = checkpoint.get('loss', [])
             print(f"Resuming from epoch {start_epoch}")
@@ -343,12 +353,21 @@ def main():
         epoch_loss /= step
         epoch_loss_values.append(epoch_loss)
         print(f"epoch {epoch} average loss: {epoch_loss:.4f}")
+        
+        # Step learning rate scheduler if enabled
+        if scheduler is not None:
+            scheduler.step()
+            current_lr = scheduler.get_last_lr()[0]
+            print(f"Learning rate: {current_lr:.6f}")
+            writer.add_scalar("learning_rate", current_lr, epoch)
+        
         writer.add_scalar("epoch_loss", epoch_loss, epoch)
         writer.flush()  # Force flush to ensure logs are written
         checkpoint = {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
             "loss": epoch_loss_values,
         }
 
