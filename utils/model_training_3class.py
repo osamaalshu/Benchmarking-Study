@@ -322,6 +322,11 @@ def main():
                 points = create_default_points(batch_size, (args.input_size, args.input_size))
                 points = points.to(device)
                 outputs = model(inputs, points=points)
+                
+                # Ensure SAC output matches input size
+                if outputs.shape[-2:] != (args.input_size, args.input_size):
+                    outputs = F.interpolate(outputs, size=(args.input_size, args.input_size), mode='bilinear', align_corners=False)
+                
                 labels_onehot = monai.networks.one_hot(labels, args.num_class)
                 loss = loss_function(outputs, labels_onehot)
             elif args.model_name.lower() == "maunet":
