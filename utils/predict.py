@@ -12,7 +12,7 @@ from models.unetr2d import UNETR2D
 from models.sac_model import SACModel, create_default_points
 from models.nnunet import create_nnunet_model
 from models.lstmunet import create_lstmunet_model
-from models.maunet import create_maunet_model
+from models.maunet import create_maunet_model, create_maunet_ensemble_model
 import time
 from skimage import io, segmentation, morphology, measure, exposure
 import tifffile as tif
@@ -38,6 +38,8 @@ def main():
     parser.add_argument('--model_name', default='swinunetr', help='select mode: unet, unetr, swinunetr, sac, nnunet, lstmunet, maunet')
     parser.add_argument('--num_class', default=3, type=int, help='segmentation classes')
     parser.add_argument('--input_size', default=256, type=int, help='segmentation classes')
+    parser.add_argument('--backbone', default=None, type=str, choices=[None, 'resnet50', 'wide_resnet50'], help='Backbone for MAUNet (overrides inference from model_path if provided)')
+    parser.add_argument('--ensemble', action='store_true', help='Use MAUNet ensemble (resnet50 + wide_resnet50) for inference')
     args = parser.parse_args()
 
     input_path = args.input_path
@@ -108,15 +110,27 @@ def main():
         ).to(device)
 
     if args.model_name.lower() == 'maunet':
-        # MAUNet can use either resnet50 or wide_resnet50 backbone
-        # Check if model path contains wide_resnet to determine backbone
-        backbone = 'wide_resnet50' if 'wide' in args.model_path else 'resnet50'
-        model = create_maunet_model(
-            num_classes=args.num_class,
-            input_size=args.input_size,
-            in_channels=3,
-            backbone=backbone
-        ).to(device)
+        # MAUNet can use either resnet50 or wide_resnet50 backbone or an ensemble of both
+        if args.ensemble:
+            model = create_maunet_ensemble_model(
+                num_classes=args.num_class,
+                input_size=args.input_size,
+                in_channels=3,
+                backbones=['resnet50', 'wide_resnet50'],
+                average=True,
+            ).to(device)
+        else:
+            if args.backbone is not None:
+                backbone = args.backbone
+            else:
+                # Infer from model path if possible
+                backbone = 'wide_resnet50' if 'wide' in args.model_path else 'resnet50'
+            model = create_maunet_model(
+                num_classes=args.num_class,
+                input_size=args.input_size,
+                in_channels=3,
+                backbone=backbone
+            ).to(device)
 
     checkpoint = torch.load(join(args.model_path, 'best_Dice_model.pth'), map_location=torch.device(device))
     model.load_state_dict(checkpoint['model_state_dict'])

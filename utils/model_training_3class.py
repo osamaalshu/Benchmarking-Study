@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 import monai
-from monai.data import decollate_batch, PILReader
+from monai.data import decollate_batch, PILReader, NumpyReader
 from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric
 from monai.transforms import (
@@ -49,7 +49,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from models.sac_model import SACModel, create_default_points
 from models.nnunet import create_nnunet_model
 from models.lstmunet import create_lstmunet_model
-from models.maunet import create_maunet_model, WeightedL1Loss
+from models.maunet import create_maunet_model, create_maunet_ensemble_model, WeightedL1Loss
 
 
 
@@ -80,6 +80,11 @@ def main():
     parser.add_argument(
         "--input_size", default=256, type=int, help="segmentation classes"
     )
+    parser.add_argument("--backbone", default="resnet50", type=str, choices=["resnet50", "wide_resnet50"], help="Backbone for MAUNet")
+    parser.add_argument("--ensemble", action="store_true", help="Use MAUNet ensemble (resnet50 + wide_resnet50)")
+    parser.add_argument("--dist_path", type=str, default=None, help="Path to precomputed distance transform maps for MAUNet")
+    parser.add_argument("--dist_suffix", type=str, default=".npy", help="Suffix for distance transform filenames (e.g., .npy)")
+    parser.add_argument("--reg_loss_weight", type=float, default=0.1, help="Weight for MAUNet regression loss")
     # Training parameters
     parser.add_argument("--batch_size", default=8, type=int, help="Batch size per GPU")
     parser.add_argument("--max_epochs", default=2000, type=int)
@@ -118,64 +123,95 @@ def main():
     val_img_names = sorted(os.listdir(val_img_path))
     val_gt_names = [img_name.split(".")[0] + "_label.png" for img_name in val_img_names]
 
-    train_files = [
-        {"img": join(train_img_path, train_img_names[i]), "label": join(train_gt_path, train_gt_names[i])}
-        for i in range(len(train_img_names))
-    ]
-    val_files = [
-        {"img": join(val_img_path, val_img_names[i]), "label": join(val_gt_path, val_gt_names[i])}
-        for i in range(len(val_img_names))
-    ]
+    # Optionally include distance transform targets
+    train_files = []
+    for i in range(len(train_img_names)):
+        sample = {"img": join(train_img_path, train_img_names[i]), "label": join(train_gt_path, train_gt_names[i])}
+        if args.dist_path and os.path.isdir(args.dist_path):
+            # Distance maps saved using label basename (e.g., imgname_label.npy)
+            base_label = os.path.splitext(train_gt_names[i])[0]
+            dist_file = join(args.dist_path, base_label + args.dist_suffix)
+            if os.path.exists(dist_file):
+                sample["dist"] = dist_file
+        train_files.append(sample)
+
+    val_files = []
+    for i in range(len(val_img_names)):
+        sample = {"img": join(val_img_path, val_img_names[i]), "label": join(val_gt_path, val_gt_names[i])}
+        if args.dist_path and os.path.isdir(args.dist_path):
+            base_label = os.path.splitext(val_gt_names[i])[0]
+            dist_file = join(args.dist_path, base_label + args.dist_suffix)
+            if os.path.exists(dist_file):
+                sample["dist"] = dist_file
+        val_files.append(sample)
+
+    has_dist_train = all(["dist" in s for s in train_files]) and len(train_files) > 0
+    has_dist_val = all(["dist" in s for s in val_files]) and len(val_files) > 0
     print(
         f"training image num: {len(train_files)}, validation image num: {len(val_files)}"
     )
     #%% define transforms for image and segmentation
-    train_transforms = Compose(
-        [
-            LoadImaged(
-                keys=["img", "label"], reader=PILReader, dtype=np.uint8
-            ),  # image three channels (H, W, 3); label: (H, W)
-            EnsureChannelFirstd(keys=["label"], allow_missing_keys=True),  # label: (1, H, W)
-            EnsureChannelFirstd(keys=["img"], allow_missing_keys=True),  # image: (3, H, W)
-            ScaleIntensityd(
-                keys=["img"], allow_missing_keys=True
-            ),  # Do not scale label
-            SpatialPadd(keys=["img", "label"], spatial_size=args.input_size),
-            RandSpatialCropd(
-                keys=["img", "label"], roi_size=args.input_size, random_size=False
-            ),
-            RandAxisFlipd(keys=["img", "label"], prob=0.5),
-            RandRotate90d(keys=["img", "label"], prob=0.5, spatial_axes=[0, 1]),
-            # # intensity transform
-            RandGaussianNoised(keys=["img"], prob=0.25, mean=0, std=0.1),
-            RandAdjustContrastd(keys=["img"], prob=0.25, gamma=(1, 2)),
-            RandGaussianSmoothd(keys=["img"], prob=0.25, sigma_x=(1, 2)),
-            RandHistogramShiftd(keys=["img"], prob=0.25, num_control_points=3),
-            RandZoomd(
-                keys=["img", "label"],
-                prob=0.15,
-                min_zoom=0.8,
-                max_zoom=1.5,
-                mode=["area", "nearest"],
-            ),
-            EnsureTyped(keys=["img", "label"]),
-        ]
-    )
+    if has_dist_train:
+        train_transforms = Compose(
+            [
+                LoadImaged(keys=["img", "label"], reader=PILReader, dtype=np.uint8),
+                LoadImaged(keys=["dist"], reader=NumpyReader, allow_missing_keys=True),
+                EnsureChannelFirstd(keys=["label", "img", "dist"], allow_missing_keys=True),
+                ScaleIntensityd(keys=["img"], allow_missing_keys=True),
+                SpatialPadd(keys=["img", "label", "dist"], spatial_size=args.input_size),
+                RandSpatialCropd(keys=["img", "label", "dist"], roi_size=args.input_size, random_size=False),
+                RandAxisFlipd(keys=["img", "label", "dist"], prob=0.5),
+                RandRotate90d(keys=["img", "label", "dist"], prob=0.5, spatial_axes=[0, 1]),
+                RandGaussianNoised(keys=["img"], prob=0.25, mean=0, std=0.1),
+                RandAdjustContrastd(keys=["img"], prob=0.25, gamma=(1, 2)),
+                RandGaussianSmoothd(keys=["img"], prob=0.25, sigma_x=(1, 2)),
+                RandHistogramShiftd(keys=["img"], prob=0.25, num_control_points=3),
+                RandZoomd(keys=["img", "label", "dist"], prob=0.15, min_zoom=0.8, max_zoom=1.5, mode=["area", "nearest", "nearest"]),
+                EnsureTyped(keys=["img", "label", "dist"], allow_missing_keys=True),
+            ]
+        )
+    else:
+        train_transforms = Compose(
+            [
+                LoadImaged(keys=["img", "label"], reader=PILReader, dtype=np.uint8),
+                EnsureChannelFirstd(keys=["label", "img"], allow_missing_keys=True),
+                ScaleIntensityd(keys=["img"], allow_missing_keys=True),
+                SpatialPadd(keys=["img", "label"], spatial_size=args.input_size),
+                RandSpatialCropd(keys=["img", "label"], roi_size=args.input_size, random_size=False),
+                RandAxisFlipd(keys=["img", "label"], prob=0.5),
+                RandRotate90d(keys=["img", "label"], prob=0.5, spatial_axes=[0, 1]),
+                RandGaussianNoised(keys=["img"], prob=0.25, mean=0, std=0.1),
+                RandAdjustContrastd(keys=["img"], prob=0.25, gamma=(1, 2)),
+                RandGaussianSmoothd(keys=["img"], prob=0.25, sigma_x=(1, 2)),
+                RandHistogramShiftd(keys=["img"], prob=0.25, num_control_points=3),
+                RandZoomd(keys=["img", "label"], prob=0.15, min_zoom=0.8, max_zoom=1.5, mode=["area", "nearest"]),
+                EnsureTyped(keys=["img", "label"], allow_missing_keys=True),
+            ]
+        )
 
-    val_transforms = Compose(
-        [
-            LoadImaged(keys=["img", "label"], reader=PILReader, dtype=np.uint8),
-            EnsureChannelFirstd(keys=["label"], allow_missing_keys=True),
-            EnsureChannelFirstd(keys=["img"], allow_missing_keys=True),
-            ScaleIntensityd(keys=["img"], allow_missing_keys=True),
-            # Ensure validation images are resized to expected input size
-            SpatialPadd(keys=["img", "label"], spatial_size=args.input_size),
-            RandSpatialCropd(
-                keys=["img", "label"], roi_size=args.input_size, random_size=False
-            ),
-            EnsureTyped(keys=["img", "label"]),
-        ]
-    )
+    if has_dist_val:
+        val_transforms = Compose(
+            [
+                LoadImaged(keys=["img", "label"], reader=PILReader, dtype=np.uint8),
+                LoadImaged(keys=["dist"], reader=NumpyReader, allow_missing_keys=True),
+                EnsureChannelFirstd(keys=["label", "img", "dist"], allow_missing_keys=True),
+                ScaleIntensityd(keys=["img"], allow_missing_keys=True),
+                SpatialPadd(keys=["img", "label", "dist"], spatial_size=args.input_size),
+                RandSpatialCropd(keys=["img", "label", "dist"], roi_size=args.input_size, random_size=False),
+                EnsureTyped(keys=["img", "label", "dist"], allow_missing_keys=True),
+            ]
+        )
+    else:
+        val_transforms = Compose(
+            [
+                LoadImaged(keys=["img", "label"], reader=PILReader, dtype=np.uint8),
+                EnsureChannelFirstd(keys=["label", "img"], allow_missing_keys=True),
+                ScaleIntensityd(keys=["img"], allow_missing_keys=True),
+                SpatialPadd(keys=["img", "label"], spatial_size=args.input_size),
+                RandSpatialCropd(keys=["img", "label"], roi_size=args.input_size, random_size=False),
+                EnsureTyped(keys=["img", "label"], allow_missing_keys=True),
+            ]
+        )
 
     #% define dataset, data loader
     check_ds = monai.data.Dataset(data=train_files, transform=train_transforms)
@@ -259,12 +295,21 @@ def main():
         ).to(device)
 
     if args.model_name.lower() == "maunet":
-        model = create_maunet_model(
-            num_classes=args.num_class,
-            input_size=args.input_size,
-            in_channels=3,
-            backbone="resnet50"
-        ).to(device)
+        if args.ensemble:
+            model = create_maunet_ensemble_model(
+                num_classes=args.num_class,
+                input_size=args.input_size,
+                in_channels=3,
+                backbones=["resnet50", "wide_resnet50"],
+                average=True,
+            ).to(device)
+        else:
+            model = create_maunet_model(
+                num_classes=args.num_class,
+                input_size=args.input_size,
+                in_channels=3,
+                backbone=args.backbone,
+            ).to(device)
 
     # Setup loss functions
     if args.model_name.lower() == "maunet":
@@ -337,13 +382,18 @@ def main():
                 # Classification loss
                 class_loss = loss_function(outputs, labels_onehot)
                 
-                # Regression loss (distance transform) - need to prepare distance transform target
-                # For now, use simplified approach - can be enhanced with proper distance transform preprocessing
-                dist_target = (labels > 0).float()  # Simple binary mask as distance target
+                # Regression loss (distance transform) - prefer precomputed DT maps when provided
+                if "dist" in batch_data:
+                    dist_target = batch_data["dist"].to(device).float()
+                    # Normalize DT to [0,1] for stable training
+                    dist_target = dist_target / (dist_target.max() + 1e-6)
+                else:
+                    # Fallback: simple binary mask as proxy distance target
+                    dist_target = (labels > 0).float()
                 reg_loss = regression_loss(outputs_reg, dist_target)
                 
                 # Combined loss
-                loss = class_loss + 0.1 * reg_loss  # Weight regression loss lower
+                loss = class_loss + float(args.reg_loss_weight) * reg_loss
             else:
                 outputs = model(inputs)
                 labels_onehot = monai.networks.one_hot(labels, args.num_class)

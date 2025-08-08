@@ -5,7 +5,7 @@ MAUNet: Modality-Aware Anti-Ambiguity U-Net for Multi-Modality Cell Segmentation
 Adapted from neurips22-cellseg_saltfish repository
 """
 
-from typing import Sequence, Tuple, Type, Union
+from typing import Sequence, Tuple, Type, Union, List, Optional
 import torch
 import torch.nn as nn
 
@@ -309,3 +309,79 @@ class WeightedL1Loss(nn.Module):
         loss = (torch.sum(torch.abs(inputs * weight2)) / (num1 + 1e-3) + 
                 torch.sum(torch.abs(inputs * weight1 - weight)) / (num2 + 1e-3))
         return loss 
+
+
+class MAUNetEnsemble(nn.Module):
+    """Ensemble wrapper that averages logits from multiple MAUNet backbones.
+
+    This mirrors the "complete model" reported by the saltfish team, which
+    ensembles ResNet50 and Wide-ResNet50 variants.
+    """
+
+    def __init__(
+        self,
+        models_list: List[MAUNet],
+        average: bool = True,
+    ) -> None:
+        super().__init__()
+        if not models_list:
+            raise ValueError("models_list must contain at least one MAUNet instance")
+        self.models = nn.ModuleList(models_list)
+        self.average = average
+
+    def forward(self, x: torch.Tensor):
+        class_logits_list: List[torch.Tensor] = []
+        reg_logits_list: List[torch.Tensor] = []
+
+        for model in self.models:
+            logits_cls, logits_reg = model(x)
+            class_logits_list.append(logits_cls)
+            reg_logits_list.append(logits_reg)
+
+        # Stack along new dim and reduce
+        class_stack = torch.stack(class_logits_list, dim=0)
+        reg_stack = torch.stack(reg_logits_list, dim=0)
+
+        if self.average:
+            class_logits = class_stack.mean(dim=0)
+            reg_logits = reg_stack.mean(dim=0)
+        else:
+            # Sum as an alternative; caller can scale later
+            class_logits = class_stack.sum(dim=0)
+            reg_logits = reg_stack.sum(dim=0)
+
+        return class_logits, reg_logits
+
+
+def create_maunet_ensemble_model(
+    num_classes: int = 3,
+    input_size: int = 256,
+    in_channels: int = 3,
+    backbones: Optional[List[str]] = None,
+    average: bool = True,
+):
+    """Factory for MAUNet ensemble of multiple backbones.
+
+    Args:
+        num_classes: number of segmentation classes
+        input_size: input square size
+        in_channels: number of input channels
+        backbones: list of backbones to include, defaults to ["resnet50", "wide_resnet50"]
+        average: whether to average or sum logits across members
+    """
+    if backbones is None:
+        backbones = ["resnet50", "wide_resnet50"]
+
+    members: List[MAUNet] = []
+    for backbone in backbones:
+        members.append(
+            MAUNet(
+                img_size=(input_size, input_size),
+                in_channels=in_channels,
+                out_channels=num_classes,
+                spatial_dims=2,
+                backbone=backbone,
+            )
+        )
+
+    return MAUNetEnsemble(models_list=members, average=average)
