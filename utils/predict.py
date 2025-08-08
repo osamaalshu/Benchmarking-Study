@@ -39,7 +39,8 @@ def main():
     parser.add_argument('--num_class', default=3, type=int, help='segmentation classes')
     parser.add_argument('--input_size', default=256, type=int, help='segmentation classes')
     parser.add_argument('--backbone', default=None, type=str, choices=[None, 'resnet50', 'wide_resnet50'], help='Backbone for MAUNet (overrides inference from model_path if provided)')
-    parser.add_argument('--ensemble', action='store_true', help='Use MAUNet ensemble (resnet50 + wide_resnet50) for inference')
+    parser.add_argument('--ensemble', action='store_true', help='Use MAUNet ensemble for inference')
+    parser.add_argument('--model_paths', type=str, default=None, help='Comma-separated list of model checkpoint directories for ensemble members')
     args = parser.parse_args()
 
     input_path = args.input_path
@@ -110,21 +111,33 @@ def main():
         ).to(device)
 
     if args.model_name.lower() == 'maunet':
-        # MAUNet can use either resnet50 or wide_resnet50 backbone or an ensemble of both
+        # MAUNet can use either resnet50 or wide_resnet50 backbone or an ensemble
         if args.ensemble:
+            if not args.model_paths:
+                raise ValueError("--ensemble requires --model_paths with comma-separated checkpoint directories")
+            paths = [p.strip() for p in args.model_paths.split(',') if p.strip()]
+            if len(paths) < 2:
+                raise ValueError("Provide at least two paths in --model_paths for ensemble")
+            # Deduce backbones per path
+            backbones = [('wide_resnet50' if 'wide' in p.lower() else 'resnet50') for p in paths]
             model = create_maunet_ensemble_model(
                 num_classes=args.num_class,
                 input_size=args.input_size,
                 in_channels=3,
-                backbones=['resnet50', 'wide_resnet50'],
+                backbones=backbones,
                 average=True,
             ).to(device)
+            # Load each member's checkpoint
+            for idx, member in enumerate(model.models):
+                ckpt_file = join(paths[idx], 'best_Dice_model.pth')
+                checkpoint = torch.load(ckpt_file, map_location=torch.device(device))
+                member.load_state_dict(checkpoint['model_state_dict'])
         else:
             if args.backbone is not None:
                 backbone = args.backbone
             else:
                 # Infer from model path if possible
-                backbone = 'wide_resnet50' if 'wide' in args.model_path else 'resnet50'
+                backbone = 'wide_resnet50' if 'wide' in args.model_path.lower() else 'resnet50'
             model = create_maunet_model(
                 num_classes=args.num_class,
                 input_size=args.input_size,
@@ -132,8 +145,9 @@ def main():
                 backbone=backbone
             ).to(device)
 
-    checkpoint = torch.load(join(args.model_path, 'best_Dice_model.pth'), map_location=torch.device(device))
-    model.load_state_dict(checkpoint['model_state_dict'])
+    if not args.ensemble:
+        checkpoint = torch.load(join(args.model_path, 'best_Dice_model.pth'), map_location=torch.device(device))
+        model.load_state_dict(checkpoint['model_state_dict'])
     #%%
     roi_size = (args.input_size, args.input_size)
     sw_batch_size = 4
