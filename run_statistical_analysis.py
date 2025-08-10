@@ -165,7 +165,7 @@ def main():
         print(f"{'='*60}")
         
         try:
-            results = perform_cross_model_statistical_analysis(args.metrics_dir, args.output_dir, threshold)
+            results = perform_cross_model_statistical_analysis(args.metrics_dir, args.output_dir, [threshold])
             all_results[f'threshold_{threshold}'] = results
             
             if results:

@@ -61,8 +61,16 @@ def load_training_info():
             'arch': 'MAU-Net with ResNet50 backbone', 
             'batch_size': 8, 
             'lr': '6e-4', 
-            'input_size': '512x512',
+            'input_size': '256x256',
             'source': 'NeurIPS 2022 Challenge',
+            'repository': 'https://github.com/Woof6/neurips22-cellseg_saltfish'
+        },
+        'maunet_ensemble': {
+            'arch': 'MAU-Net Ensemble (ResNet50 + Wide-ResNet50)', 
+            'batch_size': 'N/A (Ensemble)', 
+            'lr': 'N/A (Ensemble)', 
+            'input_size': '256x256',
+            'source': 'NeurIPS 2022 Challenge (Ensemble)',
             'repository': 'https://github.com/Woof6/neurips22-cellseg_saltfish'
         }
     }
@@ -81,8 +89,8 @@ def load_training_info():
         
         # Try to load training logs
         if model_name == 'maunet':
-            # Special handling for MAUNet
-            checkpoint_path = 'baseline/work_dir/maunet_3class/maunet_resnet50/best_Dice_model.pth'
+            # Special handling for individual MAUNet (ResNet50)
+            checkpoint_path = 'baseline/work_dir/maunet(Normal)_3class/best_Dice_model.pth'
             if os.path.exists(checkpoint_path):
                 try:
                     checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
@@ -102,6 +110,12 @@ def load_training_info():
                     info['Final Loss'] = 'N/A'
                     info['Best Val Dice'] = 'N/A'
                     info['Training Status'] = f'Error: {str(e)}'
+        elif model_name == 'maunet_ensemble':
+            # Special handling for MAUNet ensemble
+            info['Total Epochs'] = 'N/A (Ensemble)'
+            info['Final Loss'] = 'N/A (Ensemble)'
+            info['Best Val Dice'] = 'N/A (Ensemble)'
+            info['Training Status'] = 'Ensemble Model'
         else:
             # Load from npz files for other models
             log_path = f'baseline/work_dir/{model_name}_3class/train_log.npz'
@@ -132,7 +146,7 @@ def load_training_info():
 
 def generate_markdown_report(output_path):
     """Generate a comprehensive markdown report"""
-    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet']
+    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet', 'maunet_ensemble']
     base_path = "./test_predictions"
     
     # Start report
@@ -212,7 +226,7 @@ def generate_markdown_report(output_path):
     # Training Summary
     completed_models = [t for t in training_info if t['Training Status'] == 'Completed']
     total_epochs = [t['Total Epochs'] for t in training_info if isinstance(t['Total Epochs'], int)]
-    val_dice_scores = [float(t['Best Val Dice']) for t in training_info if t['Best Val Dice'] not in ['N/A', 'N/A (No validation)']]
+    val_dice_scores = [float(t['Best Val Dice']) for t in training_info if t['Best Val Dice'] not in ['N/A', 'N/A (No validation)', 'N/A (Ensemble)'] and isinstance(t['Best Val Dice'], str) and t['Best Val Dice'].replace('.', '').isdigit()]
     
     report.append("\n### Training Summary\n")
     report.append(f"- **Total Models Trained**: {len(completed_models)}\n")
@@ -234,7 +248,7 @@ def generate_markdown_report(output_path):
     # Check for available comparison images
     comparison_dir = "./visualization_results"
     sample_images = []
-    for model_dir in ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet']:
+    for model_dir in ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet', 'maunet_ensemble']:
         model_path = os.path.join(comparison_dir, model_dir)
         if os.path.exists(model_path):
             images = [f for f in os.listdir(model_path) if f.endswith('_comparison.png')]
@@ -353,6 +367,110 @@ def generate_markdown_report(output_path):
     report.append(comparison_df.to_markdown(index=False))
     report.append("\n")
     
+    # Statistical Significance Analysis
+    report.append("### Statistical Significance Analysis\n")
+    
+    # Load statistical analysis results
+    stats_file = os.path.join(output_path, "statistical_significance_summary.json")
+    if os.path.exists(stats_file):
+        try:
+            import json
+            with open(stats_file, 'r') as f:
+                stats_data = json.load(f)
+            
+            # Add statistical summary for threshold 0.5
+            if 'threshold_0.5' in stats_data:
+                threshold_data = stats_data['threshold_0.5']
+                if 'threshold_0.5' in threshold_data:  # Nested structure
+                    threshold_data = threshold_data['threshold_0.5']
+                
+                # F1 Score Statistical Analysis
+                if 'F1' in threshold_data:
+                    f1_stats = threshold_data['F1']
+                    
+                    # Descriptive Statistics
+                    if 'descriptive_stats' in f1_stats:
+                        report.append("#### F1 Score Descriptive Statistics\n")
+                        report.append("| Model | Mean ± Std | Median | 95% CI | Range |\n")
+                        report.append("|-------|------------|--------|--------|-------|\n")
+                        
+                        for model, stats in f1_stats['descriptive_stats'].items():
+                            mean_std = f"{stats['mean']:.4f} ± {stats['std']:.4f}"
+                            median = f"{stats['median']:.4f}"
+                            ci = f"[{stats['ci_lower']:.4f}, {stats['ci_upper']:.4f}]"
+                            range_val = f"[{stats['min']:.4f}, {stats['max']:.4f}]"
+                            report.append(f"| {model.upper()} | {mean_std} | {median} | {ci} | {range_val} |\n")
+                        report.append("\n")
+                    
+                    # ANOVA Results
+                    if 'anova' in f1_stats and 'error' not in f1_stats['anova']:
+                        anova = f1_stats['anova']
+                        report.append("#### F1 Score ANOVA Results\n")
+                        report.append(f"- **F-statistic**: {anova['statistic']:.4f}\n")
+                        report.append(f"- **p-value**: {anova['p_value']:.6f}\n")
+                        report.append(f"- **Significant**: {'Yes' if anova['significant'] else 'No'}\n")
+                        report.append("\n")
+                    
+                    # Kruskal-Wallis Results
+                    if 'kruskal_wallis' in f1_stats and 'error' not in f1_stats['kruskal_wallis']:
+                        kw = f1_stats['kruskal_wallis']
+                        report.append("#### F1 Score Kruskal-Wallis Results\n")
+                        report.append(f"- **H-statistic**: {kw['statistic']:.4f}\n")
+                        report.append(f"- **p-value**: {kw['p_value']:.6f}\n")
+                        report.append(f"- **Significant**: {'Yes' if kw['significant'] else 'No'}\n")
+                        report.append("\n")
+                    
+                    # Key Pairwise Comparisons
+                    if 'pairwise_comparisons' in f1_stats:
+                        report.append("#### Key Pairwise Comparisons (F1 Score)\n")
+                        report.append("| Comparison | T-test p-value | Mann-Whitney p-value | Cohen's d | Effect Size |\n")
+                        report.append("|------------|----------------|---------------------|-----------|-------------|\n")
+                        
+                        # Show most important comparisons (in alphabetical order as stored in JSON)
+                        important_comparisons = [
+                            'maunet_vs_maunet_ensemble',
+                            'nnunet_vs_maunet_ensemble', 
+                            'maunet_vs_nnunet',
+                            'unet_vs_maunet_ensemble',
+                            'maunet_vs_unet',
+                            'nnunet_vs_unet'
+                        ]
+                        
+                        for comp_name in important_comparisons:
+                            if comp_name in f1_stats['pairwise_comparisons']:
+                                comp = f1_stats['pairwise_comparisons'][comp_name]
+                                ttest = comp.get('independent_ttest', {})
+                                mw = comp.get('mannwhitney_u', {})
+                                cohens = comp.get('cohens_d', {})
+                                
+                                ttest_p = f"{ttest['p_value']:.6f}" if 'error' not in ttest else "N/A"
+                                mw_p = f"{mw['p_value']:.6f}" if 'error' not in mw else "N/A"
+                                cohens_d = f"{cohens['value']:.4f}" if 'error' not in cohens else "N/A"
+                                effect_size = cohens.get('interpretation', 'N/A') if 'error' not in cohens else "N/A"
+                                
+                                report.append(f"| {comp_name.replace('_', ' ').upper()} | {ttest_p} | {mw_p} | {cohens_d} | {effect_size} |\n")
+                        
+                        report.append("\n")
+                
+                # Dice Score Statistical Analysis
+                if 'dice' in threshold_data:
+                    dice_stats = threshold_data['dice']
+                    if 'descriptive_stats' in dice_stats:
+                        report.append("#### Dice Score Descriptive Statistics\n")
+                        report.append("| Model | Mean ± Std | Median | 95% CI |\n")
+                        report.append("|-------|------------|--------|--------|\n")
+                        
+                        for model, stats in dice_stats['descriptive_stats'].items():
+                            mean_std = f"{stats['mean']:.4f} ± {stats['std']:.4f}"
+                            median = f"{stats['median']:.4f}"
+                            ci = f"[{stats['ci_lower']:.4f}, {stats['ci_upper']:.4f}]"
+                            report.append(f"| {model.upper()} | {mean_std} | {median} | {ci} |\n")
+                        report.append("\n")
+        except Exception as e:
+            report.append(f"*Statistical analysis data could not be loaded: {str(e)}*\n\n")
+    else:
+        report.append("*Statistical significance analysis not available*\n\n")
+    
     # Recommendations
     report.append("\n## Recommendations\n")
     report.append("Based on the benchmarking results:\n")
@@ -363,6 +481,11 @@ def generate_markdown_report(output_path):
     
     # Save report
     report_text = '\n'.join(report)
+    
+    # Clean up any double newlines in tables
+    report_text = report_text.replace('\n\n\n', '\n\n')
+    report_text = report_text.replace('|\n\n|', '|\n|')
+    
     report_path = os.path.join(output_path, 'benchmarking_report.md')
     with open(report_path, 'w') as f:
         f.write(report_text)

@@ -82,7 +82,7 @@ def calculate_metrics_summary(csv_files, output_path):
     summary_data = []
     
     # Look for metrics files with threshold suffixes
-    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet']
+    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet', 'maunet_ensemble']
     
     for model in models:
         # Try to find the 0.5 threshold file
@@ -140,7 +140,7 @@ def main():
     os.makedirs(output_base, exist_ok=True)
     
     # Models to visualize
-    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet']
+    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet', 'maunet_ensemble']
     
     # Get list of test images
     test_images = sorted([f for f in os.listdir(test_images_path) 

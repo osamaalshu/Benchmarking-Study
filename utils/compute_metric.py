@@ -132,6 +132,167 @@ def remove_boundary_cells(mask):
     new_label,_,_ = segmentation.relabel_sequential(mask)
     return new_label
 
+def perform_cross_model_statistical_analysis(metrics_dir, output_dir, thresholds=[0.5, 0.7, 0.9]):
+    """
+    Perform comprehensive statistical analysis across all models and thresholds
+    """
+    import pandas as pd
+    import numpy as np
+    from scipy import stats
+    from scipy.stats import f_oneway, kruskal
+    import os
+    
+    analysis_results = {}
+    
+    for threshold in thresholds:
+        threshold_key = f"threshold_{threshold}"
+        analysis_results[threshold_key] = {}
+        
+        # Load all model metrics for this threshold
+        all_metrics = {}
+        models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet', 'maunet_ensemble']
+        
+        for model in models:
+            metrics_file = os.path.join(metrics_dir, f"{model}_metrics-{threshold}.csv")
+            if os.path.exists(metrics_file):
+                try:
+                    df = pd.read_csv(metrics_file)
+                    all_metrics[model] = df
+                except Exception as e:
+                    print(f"Warning: Could not load {metrics_file}: {e}")
+                    continue
+        
+        if not all_metrics:
+            print(f"No metrics found for threshold {threshold}")
+            continue
+            
+        # Perform analysis for each metric
+        metrics_to_analyze = ['F1', 'precision', 'recall', 'dice']
+        
+        for metric in metrics_to_analyze:
+            if metric not in analysis_results[threshold_key]:
+                analysis_results[threshold_key][metric] = {}
+            
+            # Collect data for this metric
+            metric_data = {}
+            for model, df in all_metrics.items():
+                if metric in df.columns:
+                    metric_data[model] = df[metric].dropna().values
+            
+            if len(metric_data) < 2:
+                continue
+                
+            # Descriptive statistics
+            desc_stats = {}
+            for model, data in metric_data.items():
+                if len(data) > 0:
+                    desc_stats[model] = {
+                        'mean': np.mean(data),
+                        'std': np.std(data),
+                        'median': np.median(data),
+                        'min': np.min(data),
+                        'max': np.max(data),
+                        'ci_lower': np.percentile(data, 2.5),
+                        'ci_upper': np.percentile(data, 97.5)
+                    }
+            
+            analysis_results[threshold_key][metric]['descriptive_stats'] = desc_stats
+            
+            # ANOVA test
+            try:
+                groups = [data for data in metric_data.values() if len(data) > 0]
+                if len(groups) >= 2:
+                    f_stat, p_value = f_oneway(*groups)
+                    analysis_results[threshold_key][metric]['anova'] = {
+                        'statistic': f_stat,
+                        'p_value': p_value,
+                        'significant': p_value < 0.05
+                    }
+                else:
+                    analysis_results[threshold_key][metric]['anova'] = {'error': 'Insufficient groups'}
+            except Exception as e:
+                analysis_results[threshold_key][metric]['anova'] = {'error': str(e)}
+            
+            # Kruskal-Wallis test
+            try:
+                groups = [data for data in metric_data.values() if len(data) > 0]
+                if len(groups) >= 2:
+                    h_stat, p_value = kruskal(*groups)
+                    analysis_results[threshold_key][metric]['kruskal_wallis'] = {
+                        'statistic': h_stat,
+                        'p_value': p_value,
+                        'significant': p_value < 0.05
+                    }
+                else:
+                    analysis_results[threshold_key][metric]['kruskal_wallis'] = {'error': 'Insufficient groups'}
+            except Exception as e:
+                analysis_results[threshold_key][metric]['kruskal_wallis'] = {'error': str(e)}
+            
+            # Pairwise comparisons
+            pairwise_results = {}
+            model_names = list(metric_data.keys())
+            
+            for i in range(len(model_names)):
+                for j in range(i+1, len(model_names)):
+                    model1, model2 = model_names[i], model_names[j]
+                    comparison_name = f"{model1}_vs_{model2}"
+                    
+                    data1 = metric_data[model1]
+                    data2 = metric_data[model2]
+                    
+                    if len(data1) > 0 and len(data2) > 0:
+                        pairwise_results[comparison_name] = {}
+                        
+                        # Independent t-test
+                        try:
+                            t_stat, p_value = stats.ttest_ind(data1, data2)
+                            pairwise_results[comparison_name]['independent_ttest'] = {
+                                'statistic': t_stat,
+                                'p_value': p_value,
+                                'significant': p_value < 0.05
+                            }
+                        except Exception as e:
+                            pairwise_results[comparison_name]['independent_ttest'] = {'error': str(e)}
+                        
+                        # Mann-Whitney U test
+                        try:
+                            u_stat, p_value = stats.mannwhitneyu(data1, data2, alternative='two-sided')
+                            pairwise_results[comparison_name]['mannwhitney_u'] = {
+                                'statistic': u_stat,
+                                'p_value': p_value,
+                                'significant': p_value < 0.05
+                            }
+                        except Exception as e:
+                            pairwise_results[comparison_name]['mannwhitney_u'] = {'error': str(e)}
+                        
+                        # Cohen's d effect size
+                        try:
+                            pooled_std = np.sqrt(((len(data1) - 1) * np.var(data1, ddof=1) + 
+                                                 (len(data2) - 1) * np.var(data2, ddof=1)) / 
+                                                (len(data1) + len(data2) - 2))
+                            cohens_d = (np.mean(data1) - np.mean(data2)) / pooled_std
+                            
+                            # Interpret effect size
+                            if abs(cohens_d) < 0.2:
+                                interpretation = "Negligible"
+                            elif abs(cohens_d) < 0.5:
+                                interpretation = "Small"
+                            elif abs(cohens_d) < 0.8:
+                                interpretation = "Medium"
+                            else:
+                                interpretation = "Large"
+                            
+                            pairwise_results[comparison_name]['cohens_d'] = {
+                                'value': cohens_d,
+                                'interpretation': interpretation
+                            }
+                        except Exception as e:
+                            pairwise_results[comparison_name]['cohens_d'] = {'error': str(e)}
+            
+            analysis_results[threshold_key][metric]['pairwise_comparisons'] = pairwise_results
+    
+    return analysis_results
+
 def main():
     parser = argparse.ArgumentParser('Compute F1 score for cell segmentation results', add_help=False)
     # Dataset parameters

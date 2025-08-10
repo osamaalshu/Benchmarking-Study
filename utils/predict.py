@@ -173,7 +173,9 @@ def main():
                     pre_img_data[:,:,i] = normalize_channel(img_channel_i, lower=1, upper=99)
             
             t0 = time.time()
-            test_npy01 = pre_img_data/np.max(pre_img_data)
+            # Convert to tensor with zero-division guard
+            mx = np.max(pre_img_data)
+            test_npy01 = pre_img_data / (mx if mx > 0 else 1)
             test_tensor = torch.from_numpy(np.expand_dims(test_npy01, 0)).permute(0,3,1,2).type(torch.FloatTensor).to(device)
             
             # Handle SAC model differently (requires points)

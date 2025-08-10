@@ -39,11 +39,23 @@ class MAUNet(nn.Module):
         self.normalize = normalize
         self.backbone_type = backbone
         
-        # Initialize backbone
+        # Initialize backbone with compatibility for different torchvision versions
         if backbone == "resnet50":
-            self.res = models.resnet50(weights='IMAGENET1K_V1')
+            try:
+                # New torchvision API (>= 0.13)
+                from torchvision.models import ResNet50_Weights
+                self.res = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
+            except ImportError:
+                # Fallback for older torchvision versions
+                self.res = models.resnet50(pretrained=True)
         elif backbone == "wide_resnet50":
-            self.res = models.wide_resnet50_2(weights='IMAGENET1K_V1')
+            try:
+                # New torchvision API (>= 0.13)
+                from torchvision.models import Wide_ResNet50_2_Weights
+                self.res = models.wide_resnet50_2(weights=Wide_ResNet50_2_Weights.IMAGENET1K_V1)
+            except ImportError:
+                # Fallback for older torchvision versions
+                self.res = models.wide_resnet50_2(pretrained=True)
         else:
             raise ValueError(f"Unsupported backbone: {backbone}")
         
