@@ -6,6 +6,7 @@ Adapted from neurips22-cellseg_saltfish repository
 """
 
 from typing import Sequence, Tuple, Type, Union, List, Optional
+import math
 import torch
 import torch.nn as nn
 
@@ -224,6 +225,22 @@ class MAUNet(nn.Module):
             res_block=True,
         )
 
+        # Embedding head (for anti-ambiguity / proxy regularizer)
+        self.emb_dim = 64  # 32–128 works; 64 is a good default
+        self.emb_head = nn.Sequential(
+            nn.Conv2d(feature_size2, self.emb_dim, kernel_size=1, bias=False),
+            nn.BatchNorm2d(self.emb_dim),
+            nn.ReLU(inplace=True),
+        )
+
+        # Choose how many proxy classes to regularize:
+        # 2 = {background, interior}; 3 = {background, interior, boundary}
+        self.num_proxy_classes = out_channels if out_channels in (2, 3) else 2
+
+        # Learnable proxies (class prototypes) in embedding space
+        self.proxies = nn.Parameter(torch.randn(self.num_proxy_classes, self.emb_dim))
+        nn.init.kaiming_uniform_(self.proxies, a=math.sqrt(5))  # or xavier_uniform_
+
         # Output layers
         self.out = UnetOutBlock(
             spatial_dims=spatial_dims,
@@ -264,6 +281,7 @@ class MAUNet(nn.Module):
         dec1 = self.decoder2(dec2, enc1)
             
         dec0 = self.decoder1(dec1, enc0)
+        emb = self.emb_head(dec0)  # (B, emb_dim, H, W)
         logits = self.out(dec0)
         
         # Regression decoder (distance transform)
@@ -275,7 +293,7 @@ class MAUNet(nn.Module):
         dec0_2 = self.decoder1_2(dec1_2, enc0)
         logits_2 = self.out_2(dec0_2)
         
-        return logits, logits_2
+        return logits, logits_2, emb
 
 
 def create_maunet_model(
@@ -346,7 +364,7 @@ class MAUNetEnsemble(nn.Module):
         reg_logits_list: List[torch.Tensor] = []
 
         for model in self.models:
-            logits_cls, logits_reg = model(x)
+            logits_cls, logits_reg, _ = model(x)
             class_logits_list.append(logits_cls)
             reg_logits_list.append(logits_reg)
 

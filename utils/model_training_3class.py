@@ -37,6 +37,7 @@ from monai.transforms import (
     RandHistogramShiftd,
     EnsureTyped,
     EnsureType,
+    CenterSpatialCropd,
 )
 from monai.visualize import plot_2d_or_3d_image
 import matplotlib.pyplot as plt
@@ -50,6 +51,7 @@ from models.sac_model import SACModel, create_default_points
 from models.nnunet import create_nnunet_model
 from models.lstmunet import create_lstmunet_model
 from models.maunet import create_maunet_model, create_maunet_ensemble_model, WeightedL1Loss
+from models.proxy_losses import ProxyCELoss
 
 
 
@@ -98,6 +100,11 @@ def main():
     parser.add_argument("--checkpoint_path", type=str, help="Path to checkpoint file")
 
     args = parser.parse_args()
+
+    # Guard: training with ensemble container is not supported (proxy loss needs embeddings)
+    if args.model_name.lower() == "maunet" and args.ensemble:
+        print("⚠️  Training with --ensemble is not supported; using single-backbone MAUNet for training.")
+        args.ensemble = False
 
     monai.config.print_config()
 
@@ -197,7 +204,7 @@ def main():
                 EnsureChannelFirstd(keys=["label", "img", "dist"], allow_missing_keys=True),
                 ScaleIntensityd(keys=["img"], allow_missing_keys=True),
                 SpatialPadd(keys=["img", "label", "dist"], spatial_size=args.input_size),
-                RandSpatialCropd(keys=["img", "label", "dist"], roi_size=args.input_size, random_size=False),
+                CenterSpatialCropd(keys=["img", "label", "dist"], roi_size=args.input_size),
                 EnsureTyped(keys=["img", "label", "dist"], allow_missing_keys=True),
             ]
         )
@@ -208,7 +215,7 @@ def main():
                 EnsureChannelFirstd(keys=["label", "img"], allow_missing_keys=True),
                 ScaleIntensityd(keys=["img"], allow_missing_keys=True),
                 SpatialPadd(keys=["img", "label"], spatial_size=args.input_size),
-                RandSpatialCropd(keys=["img", "label"], roi_size=args.input_size, random_size=False),
+                CenterSpatialCropd(keys=["img", "label"], roi_size=args.input_size),
                 EnsureTyped(keys=["img", "label"], allow_missing_keys=True),
             ]
         )
@@ -243,10 +250,15 @@ def main():
         include_background=False, reduction="mean", get_not_nans=False
     )
 
-    post_pred = Compose(
-        [EnsureType(), Activations(softmax=True), AsDiscrete(threshold=0.5)]
-    )
-    post_gt = Compose([EnsureType(), AsDiscrete(to_onehot=None)])
+    post_pred = Compose([
+        EnsureType(),
+        Activations(softmax=True),
+        AsDiscrete(argmax=True, to_onehot=args.num_class),
+    ])
+    post_gt = Compose([
+        EnsureType(),
+        AsDiscrete(to_onehot=args.num_class),
+    ])
     # create UNet, DiceLoss and Adam optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -319,7 +331,24 @@ def main():
     else:
         loss_function = monai.losses.DiceCELoss(softmax=True)
     initial_lr = args.initial_lr
-    optimizer = torch.optim.AdamW(model.parameters(), initial_lr)
+    # Build optimizer with param group for proxies (no weight decay)
+    if args.model_name.lower() == "maunet":
+        proxy_params = []
+        other_params = []
+        for n, p in model.named_parameters():
+            if "proxies" in n:
+                proxy_params.append(p)
+            else:
+                other_params.append(p)
+        optimizer = torch.optim.AdamW(
+            [
+                {"params": other_params, "weight_decay": 1e-2},
+                {"params": proxy_params, "weight_decay": 0.0},
+            ],
+            lr=initial_lr,
+        )
+    else:
+        optimizer = torch.optim.AdamW(model.parameters(), initial_lr)
     
     # Setup learning rate scheduler if requested
     scheduler = None
@@ -352,6 +381,11 @@ def main():
     epoch_loss_values = list()
     metric_values = list()
     writer = SummaryWriter(model_path)
+    # Proxy loss setup (MAUNet only)
+    if args.model_name.lower() == "maunet":
+        proxy_ce = ProxyCELoss(temperature=0.07, ignore_index=-100).to(device)
+        lambda_proxy = 0.1
+    
     for epoch in range(start_epoch, max_epochs):
         model.train()
         epoch_loss = 0
@@ -376,7 +410,7 @@ def main():
                 loss = loss_function(outputs, labels_onehot)
             elif args.model_name.lower() == "maunet":
                 # MAUNet returns dual outputs: (classification, regression)
-                outputs, outputs_reg = model(inputs)
+                outputs, outputs_reg, emb = model(inputs)
                 labels_onehot = monai.networks.one_hot(labels, args.num_class)
                 
                 # Classification loss
@@ -384,16 +418,41 @@ def main():
                 
                 # Regression loss (distance transform) - prefer precomputed DT maps when provided
                 if "dist" in batch_data:
+                    # Assume precomputed distance maps are already scaled to [0,1]
                     dist_target = batch_data["dist"].to(device).float()
-                    # Normalize DT to [0,1] for stable training
-                    dist_target = dist_target / (dist_target.max() + 1e-6)
                 else:
                     # Fallback: simple binary mask as proxy distance target
                     dist_target = (labels > 0).float()
                 reg_loss = regression_loss(outputs_reg, dist_target)
+
+                # Proxy regularizer (anti-ambiguity)
+                # Build proxy targets: map 3-class {0=bg,1=interior,2=boundary} -> {0=bg,1=interior}, ignore boundary
+                y_full = labels.long().squeeze(1) if labels.dim() == 4 else labels.long()  # (B,H,W)
+                proxy_targets = torch.full_like(y_full, fill_value=-100)
+                proxy_targets[y_full == 0] = 0
+                proxy_targets[y_full == 1] = 1
+
+                # Flatten and subsample
+                B, D, H, W = emb.shape
+                emb_flat = emb.permute(0, 2, 3, 1).reshape(-1, D)
+                tgt_flat = proxy_targets.reshape(-1)
+                valid = tgt_flat != -100
+                valid_idx = valid.nonzero(as_tuple=False).squeeze(1)
+                if valid_idx.numel() > 0:
+                    K = 4096
+                    if valid_idx.numel() > K:
+                        perm = torch.randperm(valid_idx.numel(), device=valid_idx.device)[:K]
+                        sel = valid_idx[perm]
+                    else:
+                        sel = valid_idx
+                    emb_sel = emb_flat[sel]
+                    tgt_sel = tgt_flat[sel]
+                    loss_proxy = proxy_ce(emb_sel, model.proxies, tgt_sel)
+                else:
+                    loss_proxy = torch.tensor(0.0, device=device, dtype=emb.dtype)
                 
                 # Combined loss
-                loss = class_loss + float(args.reg_loss_weight) * reg_loss
+                loss = class_loss + float(args.reg_loss_weight) * reg_loss + lambda_proxy * loss_proxy
             else:
                 outputs = model(inputs)
                 labels_onehot = monai.networks.one_hot(labels, args.num_class)
@@ -426,7 +485,7 @@ def main():
             "loss": epoch_loss_values,
         }
 
-        if epoch > 20 and epoch % val_interval == 0:
+        if epoch % val_interval == 0:
             model.eval()
             with torch.no_grad():
                 # Initialize validation variables
@@ -438,9 +497,8 @@ def main():
                         "label"
                     ].to(device)
                     
-                    val_labels_onehot = monai.networks.one_hot(
-                        val_labels, args.num_class
-                    )
+                    # Keep labels as (B,1,H,W); convert to one-hot via post_gt below
+                    val_labels_for_post = val_labels
                     
                     roi_size = (args.input_size, args.input_size)
                     sw_batch_size = 4
@@ -459,8 +517,8 @@ def main():
                         # nnU-Net can handle full images directly
                         val_outputs = model(val_images)
                     elif args.model_name.lower() == "maunet":
-                        # MAUNet returns dual outputs - use only classification output for validation
-                        val_outputs, _ = model(val_images)  # Ignore regression output for validation
+                        # MAUNet returns (seg, dist, emb) - use only classification output for validation
+                        val_outputs = model(val_images)[0]
                     else:
                         val_outputs = sliding_window_inference(
                             val_images, roi_size, sw_batch_size, model
@@ -468,7 +526,7 @@ def main():
                     
                     # Apply post-processing transforms
                     val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
-                    val_labels_onehot = [post_gt(i) for i in decollate_batch(val_labels_onehot)]
+                    val_labels_onehot = [post_gt(i) for i in decollate_batch(val_labels_for_post)]
                     
                     # compute metric for current iteration
                     print(
