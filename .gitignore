@@ -65,3 +65,7 @@ events.out.tfevents.*
 *.svg
 *.ico
 *.webp 
+# Synthesis artifacts
+synthesis/datasets/
+synthesis/checkpoints/
+synthesis/results/

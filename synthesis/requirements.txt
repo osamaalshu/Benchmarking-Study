@@ -1,0 +1,5 @@
+visdom>=0.1.8.9
+dominate>=2.9.1
+scipy>=1.7
+click>=8.0
+
