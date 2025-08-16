@@ -14,7 +14,7 @@ def load_metrics_for_model(model_name, base_path):
     """Load all metrics for a specific model"""
     metrics = {}
     for threshold in ['0.5', '0.7', '0.9']:
-        csv_file = os.path.join(base_path, f"{model_name}_metrics-{threshold}.csv")
+        csv_file = os.path.join(base_path, f"{model_name}-{threshold}.csv")
         if os.path.exists(csv_file):
             metrics[threshold] = pd.read_csv(csv_file)
     return metrics
@@ -59,6 +59,14 @@ def load_training_info():
         },
         'maunet': {
             'arch': 'MAU-Net with ResNet50 backbone', 
+            'batch_size': 8, 
+            'lr': '6e-4', 
+            'input_size': '256x256',
+            'source': 'NeurIPS 2022 Challenge',
+            'repository': 'https://github.com/Woof6/neurips22-cellseg_saltfish'
+        },
+        'maunet_wide': {
+            'arch': 'MAU-Net with Wide-ResNet50 backbone', 
             'batch_size': 8, 
             'lr': '6e-4', 
             'input_size': '256x256',
@@ -110,6 +118,27 @@ def load_training_info():
                     info['Final Loss'] = 'N/A'
                     info['Best Val Dice'] = 'N/A'
                     info['Training Status'] = f'Error: {str(e)}'
+        elif model_name == 'maunet_wide':
+            # Special handling for MAUNet Wide-ResNet50
+            checkpoint_path = 'baseline/work_dir/maunet(Wide)_3class/best_Dice_model.pth'
+            if os.path.exists(checkpoint_path):
+                try:
+                    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+                    info['Total Epochs'] = checkpoint.get('epoch', 'N/A')
+                    loss_data = checkpoint.get('loss', None)
+                    if isinstance(loss_data, list) and len(loss_data) > 0:
+                        info['Final Loss'] = f"{loss_data[-1]:.4f}"
+                    elif isinstance(loss_data, (int, float)):
+                        info['Final Loss'] = f"{loss_data:.4f}"
+                    else:
+                        info['Final Loss'] = 'N/A'
+                    info['Best Val Dice'] = 'N/A (No validation)'
+                    info['Training Status'] = 'Completed'
+                except Exception as e:
+                    info['Total Epochs'] = 'N/A'
+                    info['Final Loss'] = 'N/A'
+                    info['Best Val Dice'] = 'N/A'
+                    info['Training Status'] = f'Error: {str(e)}'
         elif model_name == 'maunet_ensemble':
             # Special handling for MAUNet ensemble
             info['Total Epochs'] = 'N/A (Ensemble)'
@@ -146,7 +175,8 @@ def load_training_info():
 
 def generate_markdown_report(output_path):
     """Generate a comprehensive markdown report"""
-    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet', 'maunet_ensemble']
+    # Explicitly include the three MAUNet variants by their prediction folder names
+    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet_resnet50', 'maunet_wide', 'maunet_ensemble']
     base_path = "./test_predictions"
     
     # Start report

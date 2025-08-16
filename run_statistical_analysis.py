@@ -144,7 +144,7 @@ def main():
     import glob
     metric_files = []
     for threshold in args.thresholds:
-        files = glob.glob(os.path.join(args.metrics_dir, f"*_metrics-{threshold}.csv"))
+        files = glob.glob(os.path.join(args.metrics_dir, f"*-{threshold}.csv"))
         metric_files.extend(files)
     
     if not metric_files:

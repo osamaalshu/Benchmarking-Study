@@ -15,21 +15,16 @@ from models.lstmunet import create_lstmunet_model
 from models.maunet import create_maunet_model, create_maunet_ensemble_model
 import time
 from skimage import io, segmentation, morphology, measure, exposure
-try:
-    from skimage.feature import peak_local_max
-except Exception:
-    from skimage.morphology import local_maxima as peak_local_max
 import tifffile as tif
 
-def normalize_channel_float(img, lower=1, upper=99):
+def normalize_channel(img, lower=1, upper=99):
     non_zero_vals = img[np.nonzero(img)]
-    if non_zero_vals.size == 0:
-        return img.astype(np.float32)
-    vmin, vmax = np.percentile(non_zero_vals, [lower, upper])
-    if vmax <= vmin + 1e-6:
-        return img.astype(np.float32)
-    out = np.clip((img - vmin) / (vmax - vmin), 0, 1)
-    return out.astype(np.float32)
+    percentiles = np.percentile(non_zero_vals, [lower, upper])
+    if percentiles[1] - percentiles[0] > 0.001:
+        img_norm = exposure.rescale_intensity(img, in_range=(percentiles[0], percentiles[1]), out_range='uint8')
+    else:
+        img_norm = img
+    return img_norm.astype(np.uint8)
 
 def main():
     parser = argparse.ArgumentParser('Baseline for Microscopy image segmentation', add_help=False)
@@ -151,7 +146,12 @@ def main():
             ).to(device)
 
     if not args.ensemble:
-        checkpoint = torch.load(join(args.model_path, 'best_Dice_model.pth'), map_location=torch.device(device))
+        # Check if model_path already includes the filename
+        if args.model_path.endswith('.pth'):
+            checkpoint_path = args.model_path
+        else:
+            checkpoint_path = join(args.model_path, 'best_Dice_model.pth')
+        checkpoint = torch.load(checkpoint_path, map_location=torch.device(device))
         model.load_state_dict(checkpoint['model_state_dict'])
     #%%
     roi_size = (args.input_size, args.input_size)
@@ -171,15 +171,17 @@ def main():
                 img_data = img_data[:,:, :3]
             else:
                 pass
-            pre_img_data = np.zeros(img_data.shape, dtype=np.float32)
+            pre_img_data = np.zeros(img_data.shape, dtype=np.uint8)
             for i in range(3):
                 img_channel_i = img_data[:,:,i]
                 if len(img_channel_i[np.nonzero(img_channel_i)])>0:
-                    pre_img_data[:,:,i] = normalize_channel_float(img_channel_i, lower=1, upper=99)
+                    pre_img_data[:,:,i] = normalize_channel(img_channel_i, lower=1, upper=99)
             
             t0 = time.time()
-            # Convert to tensor (already in [0,1] floats)
-            test_tensor = torch.from_numpy(np.expand_dims(pre_img_data, 0)).permute(0,3,1,2).type(torch.FloatTensor).to(device)
+            # Convert to tensor with zero-division guard
+            mx = np.max(pre_img_data)
+            test_npy01 = pre_img_data / (mx if mx > 0 else 1)
+            test_tensor = torch.from_numpy(np.expand_dims(test_npy01, 0)).permute(0,3,1,2).type(torch.FloatTensor).to(device)
             
             # Handle SAC model differently (requires points)
             if args.model_name.lower() == 'sac':
@@ -193,47 +195,19 @@ def main():
             else:
                 # Use sliding window inference for UNet, UNetR, SwinUNetR, and nnU-Net
                 if args.model_name.lower() == 'maunet':
-                    # Fetch both heads via SWI
-                    seg_out = sliding_window_inference(test_tensor, roi_size, sw_batch_size, lambda x: model(x)[0])
-                    dist_out = sliding_window_inference(test_tensor, roi_size, sw_batch_size, lambda x: model(x)[1])
-                    test_pred_out = seg_out
+                    # MAUNet returns three outputs: segmentation, distance transform, and embeddings
+                    # Create a wrapper to handle triple outputs
+                    def maunet_predictor(x):
+                        seg_out, _, _ = model(x)  # Ignore distance transform and embedding outputs during inference
+                        return seg_out
+                    test_pred_out = sliding_window_inference(test_tensor, roi_size, sw_batch_size, maunet_predictor)
                 else:
                     test_pred_out = sliding_window_inference(test_tensor, roi_size, sw_batch_size, model)
                 
             test_pred_out = torch.nn.functional.softmax(test_pred_out, dim=1) # (B, C, H, W)
-            if args.model_name.lower() == 'maunet' and args.num_class >= 2:
-                seg_probs = test_pred_out[0].cpu().numpy()
-                dist_map = dist_out[0,0].cpu().numpy().astype(np.float32)
-                prob_background = seg_probs[0]
-                prob_interior = seg_probs[1] if seg_probs.shape[0] > 1 else seg_probs[0]
-                # Instance post-processing via watershed(-distance)
-                interior_mask = prob_interior > 0.7
-                background_mask = prob_background < 0.3
-                cell_mask = interior_mask & background_mask
-                cell_mask = morphology.remove_small_objects(cell_mask, 16)
-                if cell_mask.any():
-                    # Smooth and detect peaks
-                    import cv2
-                    dm = dist_map / (np.max(dist_map) if np.max(dist_map) > 0 else 1.0)
-                    blurred = cv2.GaussianBlur(dm, (5,5), 0)
-                    try:
-                        coords = peak_local_max(blurred, min_distance=2, threshold_rel=0.5, exclude_border=False)
-                        peaks = np.zeros_like(blurred, dtype=bool)
-                        if coords.size>0:
-                            peaks[tuple(coords.T)] = True
-                    except Exception:
-                        peaks = peak_local_max(blurred, min_distance=2, threshold_rel=0.5)
-                    markers = measure.label(peaks & cell_mask).astype(np.int32)
-                    if markers.max() > 0:
-                        ws = segmentation.watershed(-blurred, markers=markers, mask=cell_mask.astype(np.uint8))
-                        test_pred_mask = ws.astype(np.uint16)
-                    else:
-                        test_pred_mask = measure.label(cell_mask).astype(np.uint16)
-                else:
-                    test_pred_mask = np.zeros(cell_mask.shape, dtype=np.uint16)
-            else:
-                test_pred_npy = test_pred_out[0,1].cpu().numpy() if test_pred_out.shape[1]>1 else test_pred_out[0,0].cpu().numpy()
-                test_pred_mask = measure.label(morphology.remove_small_objects(morphology.remove_small_holes(test_pred_npy>0.5),16))
+            test_pred_npy = test_pred_out[0,1].cpu().numpy()
+            # convert probability map to binary mask and apply morphological postprocessing
+            test_pred_mask = measure.label(morphology.remove_small_objects(morphology.remove_small_holes(test_pred_npy>0.5),16))
             tif.imwrite(join(output_path, img_name.split('.')[0]+'_label.tiff'), test_pred_mask, compression='zlib')
             t1 = time.time()
             print(f'Prediction finished: {img_name}; img size = {pre_img_data.shape}; costing: {t1-t0:.2f}s')

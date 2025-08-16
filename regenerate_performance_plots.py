@@ -15,14 +15,14 @@ def load_metrics_for_model(model_name, base_path):
     """Load metrics for a specific model across all thresholds"""
     metrics = {}
     for threshold in ['0.5', '0.7', '0.9']:
-        file_path = os.path.join(base_path, f"{model_name}_metrics-{threshold}.csv")
+        file_path = os.path.join(base_path, f"{model_name}-{threshold}.csv")
         if os.path.exists(file_path):
             metrics[threshold] = pd.read_csv(file_path)
     return metrics
 
 def create_performance_comparison_plot():
     """Create comprehensive performance comparison plot"""
-    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet', 'maunet_ensemble']
+    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet_resnet50', 'maunet_wide', 'maunet_ensemble']
     metrics_path = "./test_predictions"
     output_path = "./visualization_results"
     
@@ -103,7 +103,7 @@ def create_performance_comparison_plot():
 
 def create_f1_threshold_comparison_plot():
     """Create F1 score comparison across different thresholds"""
-    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet', 'maunet_ensemble']
+    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet_resnet50', 'maunet_wide', 'maunet_ensemble']
     metrics_path = "./test_predictions"
     output_path = "./visualization_results"
     thresholds = ['0.5', '0.7', '0.9']
@@ -132,7 +132,7 @@ def create_f1_threshold_comparison_plot():
     plt.figure(figsize=(12, 8))
     
     # Define colors for each model
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22']
     
     for i, model in enumerate(models):
         model_data = comparison_df[comparison_df['Model'] == model.upper()]
@@ -161,7 +161,8 @@ def create_training_comparison_plot():
         'NNUNET': {'epochs': 86, 'final_loss': 0.5139, 'val_dice': 0.6744},
         'SAC': {'epochs': 52, 'final_loss': 1.3622, 'val_dice': 0.2128},
         'LSTMUNET': {'epochs': 39, 'final_loss': 0.9203, 'val_dice': 0.5898},
-        'MAUNET': {'epochs': 194, 'final_loss': 0.3911, 'val_dice': None},
+        'MAUNET_RESNET50': {'epochs': 198, 'final_loss': 0.2997, 'val_dice': None},
+        'MAUNET_WIDE': {'epochs': 98, 'final_loss': 0.3311, 'val_dice': None},
         'MAUNET_ENSEMBLE': {'epochs': None, 'final_loss': None, 'val_dice': None}
     }
     

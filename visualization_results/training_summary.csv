@@ -1,5 +1,0 @@
-Model,Total Epochs,Final Loss,Best Validation Dice,Best Epoch
-UNET,58,0.7364,0.6130,13
-NNU-NET,70,0.5406,0.6700,7
-SAC,52,1.3622,0.2128,10
-LSTM-UNET,39,0.9203,0.5898,14

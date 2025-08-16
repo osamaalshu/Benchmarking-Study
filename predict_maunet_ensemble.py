@@ -17,11 +17,25 @@ from monai.inferers import sliding_window_inference
 import time
 from skimage import io, segmentation, morphology, measure, exposure
 try:
-    # Newer scikit-image uses feature.peak_local_max
-    from skimage.feature import peak_local_max
-except Exception:
+    from skimage.feature import peak_local_maxima
+except ImportError:
     # Fallback for older scikit-image versions
-    from skimage.morphology import local_maxima as peak_local_max
+    from skimage.morphology import local_maxima as peak_local_maxima_fallback
+    def peak_local_maxima(image, indices=False, min_distance=1, threshold_rel=0.1):
+        """Fallback implementation for peak_local_maxima"""
+        from scipy.ndimage import maximum_filter
+        import numpy as np
+        
+        # Simple local maxima detection
+        neighborhood = np.ones((min_distance*2+1, min_distance*2+1))
+        local_max = maximum_filter(image, footprint=neighborhood) == image
+        threshold = threshold_rel * np.max(image)
+        local_max = local_max & (image > threshold)
+        
+        if indices:
+            return np.where(local_max)
+        else:
+            return local_max
 import tifffile as tif
 import cv2
 
@@ -54,43 +68,65 @@ def sophisticated_postprocessing(prob_background, prob_interior, distance_map):
     kernel_size = int(np.sqrt(avg_cell_size))
     kernel_size += kernel_size % 2 + 1  # Make odd
     
-    # Normalize and smooth distance map (keep float to preserve detail)
-    dmax = np.max(distance_map)
-    dm = distance_map / (dmax if dmax > 0 else 1.0)
-    blurred_distance = cv2.GaussianBlur(dm.astype(np.float32), (kernel_size, kernel_size), 0)
+    # Gaussian blur on distance map
+    blurred_distance = cv2.GaussianBlur(distance_map, (kernel_size, kernel_size), 0)
     
     # Find local maxima (cell centers)
     min_distance = max(1, int(kernel_size / 4))
-    # Detect peaks on the smoothed distance (boolean mask)
-    try:
-        # skimage>=0.20 uses coordinates when indices default changed; request mask via labels output
-        local_maxima = peak_local_max(blurred_distance, min_distance=min_distance, threshold_rel=0.6, exclude_border=False)
-        peak_mask = np.zeros_like(blurred_distance, dtype=bool)
-        if local_maxima.size > 0:
-            peak_mask[tuple(local_maxima.T)] = True
-    except Exception:
-        # Fallback where function returns boolean mask
-        peak_mask = peak_local_max(blurred_distance, min_distance=min_distance, threshold_rel=0.6)
+    local_maxima = peak_local_maxima(
+        blurred_distance, 
+        indices=False, 
+        min_distance=min_distance,
+        threshold_rel=0.6
+    )
     
-    # Create markers from peaks within cell mask
-    peak_mask = peak_mask & cell_mask
-    markers = measure.label(peak_mask).astype(np.int32)
-
-    if markers.max() == 0:
-        return np.zeros_like(cell_mask, dtype=np.uint16)
-
-    # Use watershed on negative distance to split instances, constrained by cell_mask
-    # Convert mask to uint8 for sure
-    mask_uint8 = cell_mask.astype(np.uint8)
-    # skimage's watershed expects positive basins on -distance
-    ws = segmentation.watershed(-blurred_distance, markers=markers, mask=mask_uint8)
-    final_result = ws.astype(np.int32)
+    # Create watershed markers
+    # Method 1: High confidence regions
+    high_conf_mask = blurred_distance > (0.85 * np.max(blurred_distance))
+    high_conf_labels = measure.label(high_conf_mask & cell_mask)
+    
+    # Apply watershed
+    if high_conf_labels.max() > 0:
+        # Convert to 3-channel for watershed
+        watershed_img = cv2.applyColorMap((cell_mask).astype(np.uint8), cv2.COLORMAP_JET)
+        markers = high_conf_labels + (high_conf_labels != 0).astype(np.int32) + 1 - background_mask.astype(np.int32)
+        watershed_result1 = cv2.watershed(watershed_img, markers) - 1
+        watershed_result1[watershed_result1 < 0] = 0
+        
+        # Remove watershed regions from cell mask
+        remaining_mask = cell_mask.copy()
+        remaining_mask[watershed_result1 != 0] = 0
+    else:
+        watershed_result1 = np.zeros_like(cell_mask, dtype=np.int32)
+        remaining_mask = cell_mask.copy()
+    
+    # Method 2: Local maxima based watershed
+    maxima_labels = measure.label(local_maxima & remaining_mask)
+    if maxima_labels.max() > 0:
+        watershed_img = cv2.applyColorMap((remaining_mask).astype(np.uint8), cv2.COLORMAP_JET)
+        markers = maxima_labels + (maxima_labels != 0).astype(np.int32) + 1 - background_mask.astype(np.int32)
+        watershed_result2 = cv2.watershed(watershed_img, markers) - 1
+        watershed_result2[watershed_result2 < 0] = 0
+    else:
+        watershed_result2 = np.zeros_like(cell_mask, dtype=np.int32)
+    
+    # Combine results
+    combined_result = watershed_result1 + watershed_result2 + np.max(watershed_result1) * (watershed_result2 != 0)
+    
+    # Final watershed to resolve overlaps
+    if combined_result.max() > 0:
+        watershed_img = cv2.applyColorMap((cell_mask).astype(np.uint8), cv2.COLORMAP_JET)
+        markers = combined_result + (combined_result != 0).astype(np.int32) + 1 - background_mask.astype(np.int32)
+        final_result = cv2.watershed(watershed_img, markers) - 1
+        final_result[final_result < 0] = 0
+    else:
+        final_result = combined_result
     
     # Clean up small objects based on average cell size
     final_mask = final_result > 0
     if final_result.max() > 0:
         avg_size = int(np.sum(final_mask) / final_result.max())
-        final_mask = morphology.remove_small_objects(final_mask, max(8, int(avg_size / 10)))
+        final_mask = morphology.remove_small_objects(final_mask, int(avg_size / 10))
     
     return (final_result * final_mask).astype(np.uint16)
 

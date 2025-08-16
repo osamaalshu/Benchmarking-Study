@@ -150,10 +150,10 @@ def perform_cross_model_statistical_analysis(metrics_dir, output_dir, thresholds
         
         # Load all model metrics for this threshold
         all_metrics = {}
-        models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet', 'maunet_ensemble']
+        models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet_resnet50', 'maunet_wide', 'maunet_ensemble']
         
         for model in models:
-            metrics_file = os.path.join(metrics_dir, f"{model}_metrics-{threshold}.csv")
+            metrics_file = os.path.join(metrics_dir, f"{model}-{threshold}.csv")
             if os.path.exists(metrics_file):
                 try:
                     df = pd.read_csv(metrics_file)

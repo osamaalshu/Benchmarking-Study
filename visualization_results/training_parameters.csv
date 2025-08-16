@@ -1,6 +1,0 @@
-Model,Batch Size,Learning Rate,Optimizer,Input Size
-UNet,8,6e-4,AdamW,256x256
-nnU-Net,8,6e-4,AdamW,256x256
-SAC,2,6e-4,AdamW,256x256
-LSTM-UNet,8,6e-4,AdamW,256x256
-MAUNet,8,6e-4,AdamW,512x512

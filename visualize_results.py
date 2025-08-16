@@ -82,11 +82,11 @@ def calculate_metrics_summary(csv_files, output_path):
     summary_data = []
     
     # Look for metrics files with threshold suffixes
-    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet', 'maunet_ensemble']
+    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet_resnet50', 'maunet_wide', 'maunet_ensemble']
     
     for model in models:
         # Try to find the 0.5 threshold file
-        csv_file = os.path.join(os.path.dirname(csv_files[0]), f"{model}_metrics-0.5.csv")
+        csv_file = os.path.join(os.path.dirname(csv_files[0]), f"{model}-0.5.csv")
         
         if os.path.exists(csv_file):
             df = pd.read_csv(csv_file)
@@ -140,7 +140,7 @@ def main():
     os.makedirs(output_base, exist_ok=True)
     
     # Models to visualize
-    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet', 'maunet_ensemble']
+    models = ['unet', 'nnunet', 'sac', 'lstmunet', 'maunet_resnet50', 'maunet_wide', 'maunet_ensemble']
     
     # Get list of test images
     test_images = sorted([f for f in os.listdir(test_images_path) 
@@ -194,7 +194,7 @@ def main():
     
     # Create metrics summary
     print("\nGenerating metrics summary...")
-    csv_files = [os.path.join(predictions_base, f"{model}_metrics.csv") for model in models]
+    csv_files = [os.path.join(predictions_base, f"{model}-0.5.csv") for model in models]
     summary_df = calculate_metrics_summary(csv_files, output_base)
     
     print("\nMetrics Summary (Threshold=0.5):")
