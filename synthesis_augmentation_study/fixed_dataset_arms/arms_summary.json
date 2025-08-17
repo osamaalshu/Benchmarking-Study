@@ -1,0 +1,45 @@
+{
+  "strategy": "additive_augmentation",
+  "description": "Add synthetic data to real data rather than replace",
+  "arms": [
+    {
+      "name": "R",
+      "path": "fixed_dataset_arms/R",
+      "total_samples": 900,
+      "real_samples": 900,
+      "synthetic_samples": 0
+    },
+    {
+      "name": "R+S@10",
+      "path": "fixed_dataset_arms/R+S@10",
+      "total_samples": 990,
+      "real_samples": 900,
+      "synthetic_samples": 90
+    },
+    {
+      "name": "R+S@25",
+      "path": "fixed_dataset_arms/R+S@25",
+      "total_samples": 1125,
+      "real_samples": 900,
+      "synthetic_samples": 225
+    },
+    {
+      "name": "R+S@50",
+      "path": "fixed_dataset_arms/R+S@50",
+      "total_samples": 1350,
+      "real_samples": 900,
+      "synthetic_samples": 450
+    },
+    {
+      "name": "S",
+      "path": "fixed_dataset_arms/S",
+      "total_samples": 450,
+      "real_samples": 0,
+      "synthetic_samples": 450
+    }
+  ],
+  "target_resolution": [
+    512,
+    512
+  ]
+}

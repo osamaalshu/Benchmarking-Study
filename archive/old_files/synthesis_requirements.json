@@ -1,0 +1,14 @@
+{
+  "target_resolution": "MIXED",
+  "image_mode": "RGB",
+  "image_channels": 3,
+  "label_classes": 3,
+  "label_values": [
+    0,
+    1,
+    2
+  ],
+  "mean_intensity": 179.53147664308702,
+  "std_intensity": 61.41321218793124,
+  "file_count": 900
+}

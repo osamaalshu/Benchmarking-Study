@@ -1,0 +1,10 @@
+{
+  "arm_type": "synthetic_only",
+  "total_samples": 450,
+  "real_samples": 0,
+  "synthetic_samples": 450,
+  "target_size": [
+    512,
+    512
+  ]
+}

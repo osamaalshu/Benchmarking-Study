@@ -1,0 +1,11 @@
+{
+  "arm_type": "additive_augmentation",
+  "synthetic_ratio": 0.1,
+  "total_samples": 990,
+  "real_samples": 900,
+  "synthetic_samples": 90,
+  "target_size": [
+    512,
+    512
+  ]
+}

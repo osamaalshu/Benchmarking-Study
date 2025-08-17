@@ -1,0 +1,41 @@
+# Pix2Pix Synthesis & Controlled Augmentation Study
+# Dependencies for the complete pipeline
+
+# Core ML frameworks
+torch>=2.6.0
+torchvision>=0.17.0
+numpy<2.0
+scipy>=1.9.0
+
+# Medical imaging and computer vision
+monai>=1.3.0
+opencv-python>=4.8.0
+scikit-image>=0.21.0
+pillow>=10.0.0
+
+# Data processing and visualization
+pandas>=2.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+tqdm>=4.65.0
+
+# Statistical analysis
+statsmodels>=0.14.0
+
+# Configuration and utilities
+pyyaml>=6.0
+wandb>=0.15.0  # For experiment tracking (optional)
+
+# Pix2Pix specific dependencies
+dominate>=2.4.0  # For HTML visualization
+visdom>=0.1.8.9  # For real-time visualization (optional)
+
+# Development and debugging
+ipython>=8.0.0
+jupyter>=1.0.0
+
+# Platform-specific installations:
+# For Apple Silicon (MPS):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# For NVIDIA CUDA:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121

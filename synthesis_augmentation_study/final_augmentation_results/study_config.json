@@ -1,0 +1,26 @@
+{
+  "base_data_dir": "data",
+  "train_data_dir": "data/train-preprocessed",
+  "val_data_dir": "data/val",
+  "test_data_dir": "data/test",
+  "dataset_arms_dir": "fixed_dataset_arms",
+  "models": [
+    "nnunet"
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "batch_size": 4,
+  "max_epochs": 5,
+  "val_interval": 1,
+  "num_workers": 0,
+  "device": "mps",
+  "output_dir": "final_augmentation_results",
+  "save_predictions": true,
+  "generate_plots": true,
+  "skip_cascaded_setup": true,
+  "skip_data_generation": true,
+  "use_existing_arms": true
+}
