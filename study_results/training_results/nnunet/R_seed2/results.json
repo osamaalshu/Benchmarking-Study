@@ -1,0 +1,47 @@
+{
+  "arm_name": "R",
+  "seed": 2,
+  "best_dice": 0.20569149014799795,
+  "final_epoch": 3,
+  "training_time": 1295.080332994461,
+  "train_losses": [
+    0.8402684725655449,
+    0.6851197796397739,
+    0.6219174800978766,
+    0.5945294246408674
+  ],
+  "val_losses": [
+    0.6934609246253968,
+    0.5949348723888397,
+    0.5319352853298187,
+    0.5262394320964813
+  ],
+  "val_dices": [
+    0.022978973682670024,
+    0.079275531185984,
+    0.20569149014799795,
+    0.1740909695255062
+  ],
+  "total_steps": 900,
+  "config": {
+    "model_name": "nnunet",
+    "batch_size": 4,
+    "initial_lr": 0.0006,
+    "max_epochs": 30,
+    "input_size": 256,
+    "num_classes": 3,
+    "seed": 42,
+    "device": "mps",
+    "optimizer": "AdamW",
+    "scheduler": "CosineAnnealingLR",
+    "loss_function": "CrossEntropyLoss",
+    "early_stopping_patience": 10,
+    "val_interval": 2,
+    "arm_name": "R",
+    "arm_dir": "study_results/dataset_arms/R",
+    "val_dir": "./data/val",
+    "run_seed": 2,
+    "output_dir": "study_results/training_results/nnunet/R_seed2",
+    "start_time": "2025-08-17T14:08:49.472515"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "arm_name": "RxS@50",
+  "seed": 1,
+  "best_dice": 0.01525579067234495,
+  "final_epoch": 3,
+  "training_time": 247.25000429153442,
+  "train_losses": [
+    0.6659878506925371,
+    0.5362685687012143,
+    0.5031239217850897,
+    0.4810747614834044
+  ],
+  "val_losses": [
+    0.659855774641037,
+    0.679618906378746,
+    0.5820620518922806,
+    0.5570452117919922
+  ],
+  "val_dices": [
+    0.014351859241809633,
+    0.0002711457069587823,
+    0.010674502152153436,
+    0.01525579067234495
+  ],
+  "total_steps": 900,
+  "config": {
+    "model_name": "nnunet",
+    "batch_size": 4,
+    "initial_lr": 0.0006,
+    "max_epochs": 30,
+    "input_size": 256,
+    "num_classes": 3,
+    "seed": 42,
+    "device": "mps",
+    "optimizer": "AdamW",
+    "scheduler": "CosineAnnealingLR",
+    "loss_function": "CrossEntropyLoss",
+    "early_stopping_patience": 10,
+    "val_interval": 2,
+    "arm_name": "RxS@50",
+    "arm_dir": "study_results/dataset_arms/RxS@50",
+    "val_dir": "./data/val",
+    "run_seed": 1,
+    "output_dir": "study_results/training_results/nnunet/RxS@50_seed1",
+    "start_time": "2025-08-17T13:38:02.601162"
+  }
+}

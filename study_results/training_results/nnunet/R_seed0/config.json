@@ -1,0 +1,21 @@
+{
+  "model_name": "nnunet",
+  "batch_size": 4,
+  "initial_lr": 0.0006,
+  "max_epochs": 30,
+  "input_size": 256,
+  "num_classes": 3,
+  "seed": 42,
+  "device": "mps",
+  "optimizer": "AdamW",
+  "scheduler": "CosineAnnealingLR",
+  "loss_function": "CrossEntropyLoss",
+  "early_stopping_patience": 10,
+  "val_interval": 2,
+  "arm_name": "R",
+  "arm_dir": "study_results/dataset_arms/R",
+  "val_dir": "./data/val",
+  "run_seed": 0,
+  "output_dir": "study_results/training_results/nnunet/R_seed0",
+  "start_time": "2025-08-17T13:59:39.989263"
+}

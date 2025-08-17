@@ -1,0 +1,7 @@
+{
+  "arm_type": "real_only",
+  "total_samples": 900,
+  "real_samples": 900,
+  "synthetic_samples": 0,
+  "seed": 42
+}

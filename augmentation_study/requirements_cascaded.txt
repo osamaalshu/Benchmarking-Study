@@ -1,0 +1,25 @@
+# Cascaded Diffusion Dependencies - Compatible Versions
+diffusers>=0.24.0,<0.35.0
+accelerate>=0.25.0
+transformers>=4.40.0,<5.0.0
+safetensors>=0.4.0
+huggingface-hub>=0.20.0
+einops>=0.6.0
+omegaconf>=2.1.1
+albumentations>=1.3.0
+opencv-python>=4.8.0
+timm>=0.9.0
+controlnet-aux>=0.0.8
+# xformers  # Skip on macOS due to compilation issues
+
+# PyTorch (ensure compatibility)
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Additional dependencies for our study
+scipy>=1.9.1
+scikit-learn>=1.3.2
+scikit-image>=0.20.0
+
+# For fallback mask generation
+scikit-image

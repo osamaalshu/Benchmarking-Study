@@ -1,0 +1,47 @@
+{
+  "arm_name": "Rmask+SynthTex@25",
+  "seed": 0,
+  "best_dice": 0.04201990457571543,
+  "final_epoch": 3,
+  "training_time": 325.1263279914856,
+  "train_losses": [
+    0.8213829721344842,
+    0.6808990252017975,
+    0.6497310034434001,
+    0.6369021380609936
+  ],
+  "val_losses": [
+    0.6516502630710602,
+    0.5866495156288147,
+    0.562994635105133,
+    0.5393763476610184
+  ],
+  "val_dices": [
+    0.026465761034279514,
+    0.0339880309720444,
+    0.02630000347474017,
+    0.04201990457571543
+  ],
+  "total_steps": 900,
+  "config": {
+    "model_name": "nnunet",
+    "batch_size": 4,
+    "initial_lr": 0.0006,
+    "max_epochs": 30,
+    "input_size": 256,
+    "num_classes": 3,
+    "seed": 42,
+    "device": "mps",
+    "optimizer": "AdamW",
+    "scheduler": "CosineAnnealingLR",
+    "loss_function": "CrossEntropyLoss",
+    "early_stopping_patience": 10,
+    "val_interval": 2,
+    "arm_name": "Rmask+SynthTex@25",
+    "arm_dir": "study_results/dataset_arms/Rmask+SynthTex@25",
+    "val_dir": "./data/val",
+    "run_seed": 0,
+    "output_dir": "study_results/training_results/nnunet/Rmask+SynthTex@25_seed0",
+    "start_time": "2025-08-17T14:42:14.670834"
+  }
+}

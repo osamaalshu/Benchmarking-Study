@@ -1,0 +1,35 @@
+{
+  "arm_paths": {
+    "R": "study_results/dataset_arms/R",
+    "RxS@10": "study_results/dataset_arms/RxS@10",
+    "RxS@25": "study_results/dataset_arms/RxS@25",
+    "RxS@50": "study_results/dataset_arms/RxS@50",
+    "S": "study_results/dataset_arms/S",
+    "Rmask+SynthTex@25": "study_results/dataset_arms/Rmask+SynthTex@25"
+  },
+  "creation_time": "2025-08-17T05:29:48.924079",
+  "config": {
+    "train_data_dir": "./data/train-preprocessed",
+    "val_data_dir": "./data/val",
+    "test_data_dir": "./data/test",
+    "output_dir": "./study_results",
+    "mask_model_path": "./mask_ddpm_model/pipeline",
+    "texture_model_path": null,
+    "models": [
+      "nnunet"
+    ],
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "batch_size": 4,
+    "initial_lr": 0.0006,
+    "max_epochs": 30,
+    "input_size": 256,
+    "num_classes": 3,
+    "device": "auto",
+    "seed": 42,
+    "debug": false
+  }
+}
