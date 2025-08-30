@@ -12,7 +12,10 @@ from skimage import measure, feature, filters
 from scipy import ndimage
 import logging
 
-from config.analysis_config import ANALYSIS_CONFIG, IMAGE_CONFIG
+try:
+    from config.analysis_config import ANALYSIS_CONFIG, IMAGE_CONFIG
+except ImportError:
+    from analysis_config import ANALYSIS_CONFIG, IMAGE_CONFIG
 
 class MultimodalAnalyzer:
     """Analyzes and clusters images based on cellular characteristics to identify modalities"""

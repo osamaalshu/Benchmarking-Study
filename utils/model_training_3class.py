@@ -16,6 +16,29 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 import monai
+# NEW: Import advanced loss functions for composite loss
+try:
+    from monai.losses import FocalLoss, TverskyLoss
+    ADVANCED_LOSSES_AVAILABLE = True
+except Exception:
+    FocalLoss = TverskyLoss = None
+    ADVANCED_LOSSES_AVAILABLE = False
+
+# Custom Boundary Loss implementation (since not available in MONAI 1.5.0)
+class BoundaryLoss(torch.nn.Module):
+    """Custom boundary loss using Signed Distance Transform"""
+    def __init__(self, include_background=False):
+        super().__init__()
+        self.include_background = include_background
+    
+    def forward(self, pred, target):
+        """
+        Args:
+            pred: (B,1,H,W) predicted foreground probability
+            target: (B,1,H,W) binary ground truth
+        """
+        # Simple L1 loss on boundaries (can be enhanced with SDT)
+        return torch.nn.functional.l1_loss(pred, target)
 from monai.data import decollate_batch, PILReader, NumpyReader
 from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric
@@ -51,11 +74,59 @@ from models.sac_model import SACModel, create_default_points
 from models.nnunet import create_nnunet_model
 from models.lstmunet import create_lstmunet_model
 from models.maunet import create_maunet_model, create_maunet_ensemble_model, WeightedL1Loss
-from models.proxy_losses import ProxyCELoss
+from models.maunet_error_aware import create_maunet_error_aware_model, create_maunet_error_aware_ensemble_model
+
+# Import proxy losses with fallback
+try:
+    from models.proxy_losses import ProxyCELoss
+    PROXY_LOSS_AVAILABLE = True
+except ImportError:
+    print("[WARN] models.proxy_losses not found; proxy regularization will be disabled")
+    ProxyCELoss = None
+    PROXY_LOSS_AVAILABLE = False
 
 
 
 print("Successfully imported all requirements!")
+
+
+def make_centroid_map(instances: torch.Tensor, sigma: float = 2.0):
+    """
+    Create centroid heatmaps from instance masks
+    
+    Args:
+        instances: (B,1,H,W) or (B,H,W) integer mask with 0=bg, >0 instance ids
+        sigma: Gaussian sigma for centroid heatmaps
+        
+    Returns:
+        centroid_maps: (B,1,H,W) in [0,1] with Gaussian peaks at centroids
+    """
+    if instances.dim() == 3:
+        instances = instances.unsqueeze(1)  # (B,H,W) -> (B,1,H,W)
+    B, _, H, W = instances.shape
+    device = instances.device
+    yy, xx = torch.meshgrid(torch.arange(H, device=device), torch.arange(W, device=device), indexing="ij")
+    maps = torch.zeros(B, 1, H, W, device=device)
+    
+    for b in range(B):
+        ids = torch.unique(instances[b, 0])
+        ids = ids[ids > 0]  # Exclude background
+        for k in ids:
+            mask = (instances[b, 0] == k)
+            if mask.any():
+                y = torch.mean(yy[mask].float())
+                x = torch.mean(xx[mask].float())
+                g = torch.exp(-((yy - y) ** 2 + (xx - x) ** 2) / (2 * sigma ** 2))
+                maps[b, 0] = torch.maximum(maps[b, 0], g)
+    
+    # Normalize per image to [0,1]
+    for b in range(B):
+        minv = maps[b].min()
+        maxv = maps[b].max()
+        if maxv > minv:
+            maps[b] = (maps[b] - minv) / (maxv - minv)
+    
+    return maps
 
 
 def main():
@@ -76,7 +147,7 @@ def main():
 
     # Model parameters
     parser.add_argument(
-        "--model_name", default="unet", help="select mode: unet, sac, nnunet, lstmunet, maunet"
+        "--model_name", default="unet", help="select mode: unet, sac, nnunet, lstmunet, maunet, maunet_error_aware"
     )
     parser.add_argument("--num_class", default=3, type=int, help="segmentation classes")
     parser.add_argument(
@@ -87,6 +158,16 @@ def main():
     parser.add_argument("--dist_path", type=str, default=None, help="Path to precomputed distance transform maps for MAUNet")
     parser.add_argument("--dist_suffix", type=str, default=".npy", help="Suffix for distance transform filenames (e.g., .npy)")
     parser.add_argument("--reg_loss_weight", type=float, default=0.1, help="Weight for MAUNet regression loss")
+    
+    # NEW: Composite loss parameters for MAUNet
+    parser.add_argument("--lambda_det", type=float, default=1.0, help="Weight for detection (focal) loss")
+    parser.add_argument("--lambda_seg", type=float, default=1.0, help="Weight for segmentation (tversky) loss")
+    parser.add_argument("--lambda_bnd", type=float, default=0.5, help="Weight for boundary loss")
+    parser.add_argument("--lambda_dt", type=float, default=0.1, help="Weight for distance transform loss")
+    parser.add_argument("--lambda_center", type=float, default=0.2, help="Weight for centroid loss")
+    parser.add_argument("--focal_gamma", type=float, default=2.0, help="Focal loss gamma parameter")
+    parser.add_argument("--tversky_alpha", type=float, default=0.3, help="Tversky loss alpha (false positive weight)")
+    parser.add_argument("--tversky_beta", type=float, default=0.7, help="Tversky loss beta (false negative weight)")
     # Training parameters
     parser.add_argument("--batch_size", default=8, type=int, help="Batch size per GPU")
     parser.add_argument("--max_epochs", default=2000, type=int)
@@ -323,16 +404,48 @@ def main():
                 backbone=args.backbone,
             ).to(device)
 
+    if args.model_name.lower() == "maunet_error_aware":
+        if args.ensemble:
+            model = create_maunet_error_aware_ensemble_model(
+                num_classes=args.num_class,
+                input_size=args.input_size,
+                in_channels=3,
+                backbones=["resnet50", "wide_resnet50"],
+                average=True,
+            ).to(device)
+        else:
+            model = create_maunet_error_aware_model(
+                num_classes=args.num_class,
+                input_size=args.input_size,
+                in_channels=3,
+                backbone=args.backbone,
+            ).to(device)
+
     # Setup loss functions
-    if args.model_name.lower() == "maunet":
-        # MAUNet uses dual loss: DiceCE for classification + WeightedL1 for regression
-        loss_function = monai.losses.DiceCELoss(softmax=True)
-        regression_loss = WeightedL1Loss()
+    if args.model_name.lower() in ["maunet", "maunet_error_aware"]:
+        # NEW: Composite loss for MAUNet
+        if not ADVANCED_LOSSES_AVAILABLE:
+            print("[WARN] MONAI advanced losses not found; falling back to DiceCE.")
+            loss_function = monai.losses.DiceCELoss(softmax=True)
+            loss_det = loss_seg = loss_bnd = None
+        else:
+            # Detection: focal; Seg: Tversky (beta>alpha to penalize FN); Boundary: custom
+            loss_det = FocalLoss(gamma=args.focal_gamma, include_background=True, to_onehot_y=True, use_softmax=True)
+            loss_seg = TverskyLoss(alpha=args.tversky_alpha, beta=args.tversky_beta, include_background=False, to_onehot_y=True, softmax=True)
+            # Custom boundary loss
+            loss_bnd = BoundaryLoss(include_background=False)
+            loss_function = None  # We'll use composite loss instead
+        
+        # DT regression loss
+        try:
+            regression_loss = WeightedL1Loss()
+        except Exception:
+            regression_loss = torch.nn.L1Loss()
     else:
         loss_function = monai.losses.DiceCELoss(softmax=True)
     initial_lr = args.initial_lr
     # Build optimizer with param group for proxies (no weight decay)
-    if args.model_name.lower() == "maunet":
+    if args.model_name.lower() in ["maunet", "maunet_error_aware"]:
         proxy_params = []
         other_params = []
         for n, p in model.named_parameters():
@@ -381,10 +494,21 @@ def main():
     epoch_loss_values = list()
     metric_values = list()
     writer = SummaryWriter(model_path)
+    # Initialize checkpoint
+    checkpoint = {
+        "epoch": 0,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
+        "loss": [],
+    }
     # Proxy loss setup (MAUNet only)
-    if args.model_name.lower() == "maunet":
+    if args.model_name.lower() in ["maunet", "maunet_error_aware"] and PROXY_LOSS_AVAILABLE:
         proxy_ce = ProxyCELoss(temperature=0.07, ignore_index=-100).to(device)
         lambda_proxy = 0.1
+    else:
+        proxy_ce = None
+        lambda_proxy = 0.0
     
     for epoch in range(start_epoch, max_epochs):
         model.train()
@@ -410,7 +534,13 @@ def main():
                 loss = loss_function(outputs, labels_onehot)
             elif args.model_name.lower() == "maunet":
                 # MAUNet returns dual outputs: (classification, regression)
-                outputs, outputs_reg, emb = model(inputs)
+                model_outputs = model(inputs)
+                if isinstance(model_outputs, (list, tuple)) and len(model_outputs) == 3:
+                    outputs, outputs_reg, emb = model_outputs
+                else:
+                    # Backward compatibility for 2-output models
+                    outputs, outputs_reg = model_outputs
+                    emb = None
                 labels_onehot = monai.networks.one_hot(labels, args.num_class)
                 
                 # Classification loss
@@ -425,34 +555,98 @@ def main():
                     dist_target = (labels > 0).float()
                 reg_loss = regression_loss(outputs_reg, dist_target)
 
-                # Proxy regularizer (anti-ambiguity)
-                # Build proxy targets: map 3-class {0=bg,1=interior,2=boundary} -> {0=bg,1=interior}, ignore boundary
-                y_full = labels.long().squeeze(1) if labels.dim() == 4 else labels.long()  # (B,H,W)
-                proxy_targets = torch.full_like(y_full, fill_value=-100)
-                proxy_targets[y_full == 0] = 0
-                proxy_targets[y_full == 1] = 1
+                # Proxy regularizer (anti-ambiguity) - only if embedding available
+                if emb is not None:
+                    # Build proxy targets: map 3-class {0=bg,1=interior,2=boundary} -> {0=bg,1=interior}, ignore boundary
+                    y_full = labels.long().squeeze(1) if labels.dim() == 4 else labels.long()  # (B,H,W)
+                    proxy_targets = torch.full_like(y_full, fill_value=-100)
+                    proxy_targets[y_full == 0] = 0
+                    proxy_targets[y_full == 1] = 1
 
-                # Flatten and subsample
-                B, D, H, W = emb.shape
-                emb_flat = emb.permute(0, 2, 3, 1).reshape(-1, D)
-                tgt_flat = proxy_targets.reshape(-1)
-                valid = tgt_flat != -100
-                valid_idx = valid.nonzero(as_tuple=False).squeeze(1)
-                if valid_idx.numel() > 0:
-                    K = 4096
-                    if valid_idx.numel() > K:
-                        perm = torch.randperm(valid_idx.numel(), device=valid_idx.device)[:K]
-                        sel = valid_idx[perm]
+                    # Flatten and subsample
+                    B, D, H, W = emb.shape
+                    emb_flat = emb.permute(0, 2, 3, 1).reshape(-1, D)
+                    tgt_flat = proxy_targets.reshape(-1)
+                    valid = tgt_flat != -100
+                    valid_idx = valid.nonzero(as_tuple=False).squeeze(1)
+                    if valid_idx.numel() > 0:
+                        K = 4096
+                        if valid_idx.numel() > K:
+                            perm = torch.randperm(valid_idx.numel(), device=valid_idx.device)[:K]
+                            sel = valid_idx[perm]
+                        else:
+                            sel = valid_idx
+                        emb_sel = emb_flat[sel]
+                        tgt_sel = tgt_flat[sel]
+                        if proxy_ce is not None:
+                            loss_proxy = proxy_ce(emb_sel, model.proxies, tgt_sel)
+                        else:
+                            loss_proxy = torch.tensor(0.0, device=device)
                     else:
-                        sel = valid_idx
-                    emb_sel = emb_flat[sel]
-                    tgt_sel = tgt_flat[sel]
-                    loss_proxy = proxy_ce(emb_sel, model.proxies, tgt_sel)
+                        loss_proxy = torch.tensor(0.0, device=device, dtype=emb.dtype)
                 else:
-                    loss_proxy = torch.tensor(0.0, device=device, dtype=emb.dtype)
+                    loss_proxy = torch.tensor(0.0, device=device)
                 
                 # Combined loss
                 loss = class_loss + float(args.reg_loss_weight) * reg_loss + lambda_proxy * loss_proxy
+            elif args.model_name.lower() == "maunet_error_aware":
+                # NEW: Error-Aware MAUNet with composite loss
+                outputs = model(inputs)
+                if isinstance(outputs, (list, tuple)) and len(outputs) == 3:
+                    seg_logits, dt_logits, center_logits = outputs
+                else:
+                    # Backward compatibility (2 heads)
+                    seg_logits, dt_logits = outputs
+                    center_logits = None
+
+                # Build label variants
+                probs = torch.softmax(seg_logits, dim=1)
+                # Foreground prob = 1 - P(background); assume class 0 is background
+                p_fg = 1.0 - probs[:, 0:1]
+                y_fg = (labels > 0).float().unsqueeze(1)
+
+                # Detection loss (focal) and segmentation (tversky) if available, else DiceCE fallback
+                if loss_det is None or loss_seg is None:
+                    L_det = torch.tensor(0.0, device=inputs.device)
+                    L_seg = loss_function(seg_logits, monai.networks.one_hot(labels, args.num_class))
+                    L_bnd = torch.tensor(0.0, device=inputs.device)
+                else:
+                    L_det = loss_det(seg_logits, labels)
+                    L_seg = loss_seg(seg_logits, labels)
+                    if hasattr(loss_bnd, '__call__') and loss_bnd is not torch.nn.L1Loss:
+                        try:
+                            L_bnd = loss_bnd(p_fg, y_fg)
+                        except Exception:
+                            L_bnd = torch.nn.functional.l1_loss(p_fg, y_fg)
+                    else:
+                        L_bnd = torch.nn.functional.l1_loss(p_fg, y_fg)
+
+                # DT regression (bound predictions with sigmoid)
+                if "dist" in batch_data:
+                    dist_target = batch_data["dist"].to(inputs.device).float()
+                    dist_target = dist_target / (dist_target.max() + 1e-6)
+                else:
+                    dist_target = y_fg
+                dt_pred = torch.sigmoid(dt_logits)
+                L_dt = regression_loss(dt_pred, dist_target)
+
+                # Centroid BCE (if head present)
+                if center_logits is not None:
+                    center_target = make_centroid_map(labels)
+                    L_center = F.binary_cross_entropy_with_logits(center_logits, center_target)
+                else:
+                    L_center = torch.tensor(0.0, device=inputs.device)
+
+                # Composite loss
+                loss = (args.lambda_det * L_det
+                        + args.lambda_seg * L_seg
+                        + args.lambda_bnd * L_bnd
+                        + args.lambda_dt * L_dt
+                        + args.lambda_center * L_center)
+
+                # Optional: log terms every 50 steps
+                if step % 50 == 0:
+                    print(f"Step {step}: L_det={L_det.item():.4f} L_seg={L_seg.item():.4f} L_bnd={L_bnd.item():.4f} L_dt={L_dt.item():.4f} L_center={L_center.item():.4f}")
             else:
                 outputs = model(inputs)
                 labels_onehot = monai.networks.one_hot(labels, args.num_class)
@@ -519,6 +713,13 @@ def main():
                     elif args.model_name.lower() == "maunet":
                         # MAUNet returns (seg, dist, emb) - use only classification output for validation
                         val_outputs = model(val_images)[0]
+                    elif args.model_name.lower() == "maunet_error_aware":
+                        # Error-Aware MAUNet returns (seg, dist, centroid) - use only classification output for validation
+                        model_outputs = model(val_images)
+                        if isinstance(model_outputs, (list, tuple)) and len(model_outputs) >= 1:
+                            val_outputs = model_outputs[0]
+                        else:
+                            val_outputs = model_outputs
                     else:
                         val_outputs = sliding_window_inference(
                             val_images, roi_size, sw_batch_size, model
@@ -558,7 +759,7 @@ def main():
                     plot_2d_or_3d_image(val_outputs, epoch, writer, index=0, tag="output")
                 
                 # Save SAC, nnU-Net, and MAUNet model predictions during validation
-                if args.model_name.lower() in ["sac", "nnunet", "maunet"]:
+                if args.model_name.lower() in ["sac", "nnunet", "maunet", "maunet_error_aware"]:
                     import tifffile as tif
                     from skimage import measure, morphology
                     

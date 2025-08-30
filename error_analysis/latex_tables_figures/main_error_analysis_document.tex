@@ -1,0 +1,101 @@
+\documentclass[11pt,a4paper]{article}
+
+% Include all required packages
+\input{error_analysis_packages.tex}
+
+\title{Instance Segmentation Error Analysis\\Comprehensive Performance Evaluation}
+\author{Your Name}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+This document presents a comprehensive error analysis of seven deep learning models for instance segmentation of cell images. The analysis covers 100 test images with detailed evaluation of error types, performance metrics, and model comparisons using micro-aggregated metrics and Hungarian matching for optimal assignment.
+
+\section{Dataset and Methodology}
+% Include dataset overview table
+\input{dataset_overview_table.tex}
+
+The error analysis methodology employs:
+\begin{itemize}
+\item \textbf{Hungarian Matching}: Optimal assignment algorithm for true positive determination
+\item \textbf{Micro-Aggregation}: Sum TP/FP/FN across all images before computing precision/recall/F1
+\item \textbf{IoU Threshold}: 0.5 for true positive classification
+\item \textbf{Enhanced Visualization}: Automatic contrast enhancement for challenging images
+\item \textbf{Comprehensive Error Categorization}: FN, FP, splits, merges with detailed analysis
+\end{itemize}
+
+\section{Model Performance Results}
+
+\subsection{Overall Performance Comparison}
+% Include main performance table
+\input{model_performance_table.tex}
+
+% Include performance comparison chart
+\input{performance_comparison_chart.tex}
+
+The results demonstrate clear performance hierarchies, with MAUNet architectures achieving superior performance across all metrics. MAUNet-Wide achieves the highest F1-score (0.529), while MAUNet-Ensemble excels in precision (0.632) and Panoptic Quality (0.437).
+
+\subsection{Panoptic Quality Analysis}
+% Include PQ breakdown table
+\input{panoptic_quality_table.tex}
+
+Panoptic Quality provides a comprehensive measure combining both detection and segmentation performance. The decomposition into Recognition Quality (RQ) and Segmentation Quality (SQ) reveals that MAUNet-Ensemble achieves superior segmentation quality, while MAUNet-Wide excels in detection performance.
+
+\section{Error Analysis}
+
+\subsection{Error Type Distribution}
+% Include error analysis table
+\input{error_analysis_table.tex}
+
+% Include error distribution chart
+\input{error_distribution_chart.tex}
+
+The error analysis reveals that false negatives (missed cells) constitute the primary error source across all models, followed by false positives. Split and merge errors are relatively rare, indicating that most models handle cell boundary detection adequately when cells are detected.
+
+\subsection{Key Findings}
+\begin{itemize}
+\item \textbf{False Negatives Dominate}: All models struggle primarily with missing cells rather than incorrect segmentation
+\item \textbf{MAUNet Superiority}: Multi-scale attention mechanisms significantly reduce all error types
+\item \textbf{Precision vs Recall Trade-off}: MAUNet-Ensemble optimizes precision while MAUNet-Wide balances precision and recall
+\item \textbf{Traditional Model Limitations}: U-Net and nnU-Net show moderate performance with higher error rates
+\end{itemize}
+
+\section{Visual Analysis}
+
+\subsection{Comprehensive Error Visualization}
+% Include comprehensive visualization figures
+\input{comprehensive_visualization_figure.tex}
+
+\subsection{Success and Failure Case Analysis}
+% Include success/failure analysis figures
+\input{success_failure_analysis_figure.tex}
+
+\subsection{Dataset Difficulty Analysis}
+% Include best/worst analysis figure
+\input{best_worst_analysis_figure.tex}
+
+\section{Conclusions}
+
+The comprehensive error analysis demonstrates:
+
+\begin{enumerate}
+\item \textbf{Architecture Impact}: Multi-scale attention mechanisms (MAUNet variants) significantly outperform traditional encoder-decoder architectures
+\item \textbf{Error Patterns}: False negatives represent the primary challenge, suggesting need for improved feature extraction and detection sensitivity
+\item \textbf{Model Complementarity}: Different MAUNet variants excel in different aspects (precision vs recall), suggesting potential for ensemble approaches
+\item \textbf{Dataset Challenges}: Image quality and cell density significantly impact performance across all models
+\end{enumerate}
+
+\section{Recommendations}
+
+Based on the analysis:
+\begin{itemize}
+\item \textbf{Production Deployment}: Use MAUNet-Wide for best overall performance
+\item \textbf{High-Precision Applications}: Deploy MAUNet-Ensemble when false positives are critical
+\item \textbf{Future Research}: Focus on reducing false negatives through improved feature extraction
+\item \textbf{Data Collection}: Prioritize high-quality, well-contrasted images for optimal performance
+\end{itemize}
+
+\end{document}

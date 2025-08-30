@@ -1,0 +1,30 @@
+\begin{table}[htbp]
+\centering
+\caption{Error Analysis Dataset Overview}
+\label{tab:dataset_overview}
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Total Images Analyzed & 100 \\
+Models Evaluated & 7 \\
+Total Evaluations & 700 \\
+Average GT Cells/Image & 454.4 \\
+IoU Threshold & 0.5 \\
+Minimum Instance Size & 10 pixels \\
+\midrule
+\multicolumn{2}{l}{\textbf{Models Analyzed:}} \\
+\quad U-Net & Classic encoder-decoder architecture \\
+\quad nnU-Net & Self-configuring U-Net variant \\
+\quad SAC & Spatial Attention Convolution \\
+\quad LSTM-UNet & LSTM-enhanced U-Net \\
+\quad MAUNet-ResNet50 & Multi-scale attention with ResNet50 \\
+\quad MAUNet-Wide & Wide multi-scale attention network \\
+\quad MAUNet-Ensemble & Ensemble of MAUNet variants \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\small
+\item Note: Analysis excludes cell\_00101 due to data quality issues. All metrics computed using Hungarian matching for optimal assignment.
+\end{tablenotes}
+\end{table}

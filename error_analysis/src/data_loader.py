@@ -10,7 +10,10 @@ import pandas as pd
 from typing import Dict, List, Tuple, Optional
 import logging
 
-from config.analysis_config import *
+try:
+    from config.analysis_config import *
+except ImportError:
+    from analysis_config import *
 
 class DataLoader:
     """Handles loading of test images, ground truth, and model predictions"""

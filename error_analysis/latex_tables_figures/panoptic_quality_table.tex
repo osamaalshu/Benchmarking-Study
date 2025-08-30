@@ -1,0 +1,27 @@
+\begin{table}[htbp]
+\centering
+\caption{Panoptic Quality Analysis - Detailed Breakdown}
+\label{tab:panoptic_quality}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Model} & \textbf{PQ} & \textbf{RQ} & \textbf{SQ} \\
+\midrule
+\textbf{MAUNet-Ensemble} & \textbf{0.437} & 0.499 & \textbf{0.876} \\
+\textbf{MAUNet-Wide} & 0.413 & \textbf{0.529} & 0.781 \\
+\textbf{MAUNet-ResNet50} & 0.399 & 0.507 & 0.787 \\
+nnU-Net & 0.278 & 0.357 & 0.778 \\
+U-Net & 0.239 & 0.315 & 0.758 \\
+LSTM-UNet & 0.199 & 0.282 & 0.706 \\
+SAC & 0.002 & 0.003 & 0.667 \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\small
+\item Note: Bold values indicate best performance in each metric.
+\item PQ (Panoptic Quality) = RQ × SQ, measures overall segmentation performance
+\item RQ (Recognition Quality) = Detection performance (similar to F1-score)
+\item SQ (Segmentation Quality) = IoU quality of matched instances
+\item MAUNet-Ensemble achieves highest PQ through superior segmentation quality
+\item MAUNet-Wide achieves highest recognition quality (detection performance)
+\end{tablenotes}
+\end{table}

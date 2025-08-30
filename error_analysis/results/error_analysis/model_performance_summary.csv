@@ -1,0 +1,8 @@
+model,f1_score_mean,PQ_mean,precision,recall,false_negatives_mean,false_positives_mean,splits_mean,merges_mean
+lstmunet,0.207,0.165,0.14,0.4,9.0,37.0,0.0,0.0
+maunet_ensemble,0.88,0.793,0.964,0.967,2.75,3.0,0.0,0.5
+maunet_resnet50,0.702,0.598,0.415,0.303,386.25,236.25,0.0,23.0
+maunet_wide,0.736,0.642,0.686,0.8,3.0,5.5,0.0,0.0
+nnunet,0.7,0.587,0.913,0.892,16.5,13.0,0.0,7.0
+sac,0.039,0.022,0.022,0.2,12.0,136.0,0.0,0.0
+unet,0.16,0.128,0.116,0.076,3018.5,1897.5,2.0,171.0

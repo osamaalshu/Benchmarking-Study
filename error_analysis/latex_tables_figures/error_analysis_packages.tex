@@ -1,0 +1,45 @@
+% Required packages for error analysis tables and figures
+\usepackage{booktabs}        % Professional table formatting
+\usepackage{array}           % Enhanced table column formatting
+\usepackage{longtable}       % Tables spanning multiple pages
+\usepackage{threeparttable}  % Table notes
+\usepackage{multirow}        % Multi-row cells
+\usepackage{graphicx}        % Include graphics
+\usepackage{float}           % Better float positioning
+\usepackage{caption}         % Enhanced captions
+\usepackage{subcaption}      % Subfigures and subcaptions
+\usepackage{pgfplots}        % For creating charts with TikZ
+\usepackage{tikz}            % Drawing graphics
+\usepackage{xcolor}          % Colors
+\usepackage{amsmath}         % Mathematical formatting
+\usepackage{siunitx}         % SI units and number formatting
+
+% PGF plots settings
+\pgfplotsset{compat=1.18}
+
+% Color definitions for consistency
+\definecolor{maunetcolor}{RGB}{31, 119, 180}      % Blue for MAUNet variants
+\definecolor{traditionalcolor}{RGB}{255, 127, 14} % Orange for traditional models
+\definecolor{errorcolor}{RGB}{214, 39, 40}        % Red for errors
+\definecolor{successcolor}{RGB}{44, 160, 44}      % Green for success
+
+% Table formatting commands
+\newcommand{\bestvalue}[1]{\textbf{#1}}          % Bold for best values
+\newcommand{\modelname}[1]{\textbf{#1}}          % Bold for model names
+
+% Figure path (adjust according to your document structure)
+\graphicspath{{error_analysis/results/}}
+
+% Custom table notes environment
+\newenvironment{tablenotes}
+  {\begin{minipage}{\textwidth}\footnotesize}
+  {\end{minipage}}
+
+% Caption formatting
+\captionsetup{
+  font=small,
+  labelfont=bf,
+  format=plain,
+  justification=justified,
+  singlelinecheck=false
+}

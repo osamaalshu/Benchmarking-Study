@@ -10,8 +10,14 @@ from typing import Dict, List, Tuple, Optional
 import seaborn as sns
 from scipy import ndimage
 import logging
+from skimage import exposure, filters
+from skimage.util import img_as_float, img_as_ubyte
+from skimage.transform import resize
 
-from config.analysis_config import ANALYSIS_CONFIG, IMAGE_CONFIG, MODELS
+try:
+    from config.analysis_config import ANALYSIS_CONFIG, IMAGE_CONFIG, MODELS
+except ImportError:
+    from analysis_config import ANALYSIS_CONFIG, IMAGE_CONFIG, MODELS
 
 class VisualInspector:
     """Creates comprehensive visual comparisons and qualitative analysis"""
@@ -28,7 +34,86 @@ class VisualInspector:
             'false_negative': (0, 0, 255),     # Blue
             'true_negative': (128, 128, 128)   # Gray
         }
+    
+    def enhance_image_visibility(self, image: np.ndarray) -> np.ndarray:
+        """
+        Enhance image visibility for microscopy images with poor contrast
+        Handles different modalities (bright field, fluorescence, phase contrast)
+        """
+        if len(image.shape) == 3:
+            # RGB image - check if it's actually grayscale stored as RGB
+            if np.allclose(image[:,:,0], image[:,:,1]) and np.allclose(image[:,:,1], image[:,:,2]):
+                # Convert to grayscale
+                img_gray = image[:,:,0].astype(np.float32)
+            else:
+                # True RGB - convert to grayscale using luminance
+                img_gray = 0.299 * image[:,:,0].astype(np.float32) + \
+                          0.587 * image[:,:,1].astype(np.float32) + \
+                          0.114 * image[:,:,2].astype(np.float32)
+        else:
+            img_gray = image.astype(np.float32)
         
+        # Normalize to [0, 1]
+        if img_gray.max() > 1.0:
+            img_gray = img_gray / 255.0
+        
+        # Analyze image characteristics
+        mean_intensity = np.mean(img_gray)
+        std_intensity = np.std(img_gray)
+        
+        # Apply different enhancement strategies based on image characteristics
+        if mean_intensity < 0.3:
+            # Dark image - likely fluorescence or dark field
+            # Use CLAHE (Contrast Limited Adaptive Histogram Equalization)
+            img_enhanced = exposure.equalize_adapthist(img_gray, clip_limit=0.03)
+        elif mean_intensity > 0.7:
+            # Bright image - likely bright field or phase contrast
+            # Invert and enhance
+            img_enhanced = 1.0 - img_gray
+            img_enhanced = exposure.equalize_adapthist(img_enhanced, clip_limit=0.02)
+        elif std_intensity < 0.1:
+            # Low contrast image
+            # Use gamma correction and histogram equalization
+            img_enhanced = exposure.adjust_gamma(img_gray, gamma=0.7)
+            img_enhanced = exposure.equalize_hist(img_enhanced)
+        else:
+            # Normal contrast - just enhance slightly
+            img_enhanced = exposure.equalize_adapthist(img_gray, clip_limit=0.01)
+        
+        # Apply slight Gaussian smoothing to reduce noise
+        img_enhanced = filters.gaussian(img_enhanced, sigma=0.5)
+        
+        # Ensure values are in [0, 1]
+        img_enhanced = np.clip(img_enhanced, 0, 1)
+        
+        return img_enhanced
+    
+    def create_enhanced_display_image(self, image: np.ndarray, title: str = "") -> np.ndarray:
+        """
+        Create an enhanced version of the image for display
+        Returns both original and enhanced versions
+        """
+        # Create enhanced version
+        enhanced = self.enhance_image_visibility(image)
+        
+        # Create a side-by-side comparison
+        if len(image.shape) == 3 and image.shape[2] == 3:
+            # RGB image
+            if np.allclose(image[:,:,0], image[:,:,1]) and np.allclose(image[:,:,1], image[:,:,2]):
+                # Grayscale stored as RGB
+                original_gray = image[:,:,0]
+            else:
+                # True RGB - convert to grayscale for comparison
+                original_gray = 0.299 * image[:,:,0] + 0.587 * image[:,:,1] + 0.114 * image[:,:,2]
+        else:
+            original_gray = image
+        
+        # Normalize original for display
+        if original_gray.max() > 1.0:
+            original_gray = original_gray / 255.0
+        
+        return enhanced, original_gray
+
     def create_error_overlay(self, ground_truth, prediction, error_analysis):
         """Create color-coded error overlay showing FP, FN, TP, and boundary errors"""
         h, w = ground_truth.shape
@@ -69,13 +154,16 @@ class VisualInspector:
     def create_side_by_side_comparison(self, original_image, ground_truth, predictions, error_results, image_name, save_path=None):
         """Create enhanced side-by-side comparison with error overlays"""
         n_models = len(predictions)
-        # Show: Original, GT, and for each model: Prediction + Error Overlay
-        n_cols = 4  # Original, GT, Model Pred, Error Overlay
+        # Show: Original (Enhanced), Original (Raw), GT, and for each model: Prediction + Error Overlay
+        n_cols = 5  # Enhanced Original, Raw Original, GT, Model Pred, Error Overlay
         n_rows = max(1, n_models)  # One row per model
         
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, 5*n_rows))
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(25, 5*n_rows))
         if n_rows == 1:
             axes = axes.reshape(1, -1)
+        
+        # Get enhanced and raw versions of original image
+        enhanced_original, raw_original = self.create_enhanced_display_image(original_image)
         
         # Handle image display with proper contrast
         def display_image(ax, img, title, cmap=None):
@@ -95,31 +183,36 @@ class VisualInspector:
             ax.set_title(title, fontweight='bold', fontsize=10)
             ax.axis('off')
         
-        # First row: Original and GT (same for all models)
+        # First row: Original (Enhanced), Original (Raw), and GT (same for all models)
         for row in range(n_rows):
-            # Column 0: Original image
-            display_image(axes[row, 0], original_image, 'Original Image')
+            # Column 0: Enhanced Original image
+            display_image(axes[row, 0], enhanced_original, 'Original Image (Enhanced)')
             
-            # Column 1: Ground truth
-            gt_cells = list(error_results.values())[0]['summary']['gt_num_cells']
-            display_image(axes[row, 1], ground_truth, f'Ground Truth\n{gt_cells} cells', cmap='viridis')
+            # Column 1: Raw Original image
+            display_image(axes[row, 1], raw_original, 'Original Image (Raw)')
+            
+            # Column 2: Ground truth
+            # Get gt_cells from the first available model's error results
+            first_model = list(error_results.keys())[0]
+            gt_cells = error_results[first_model]['summary']['gt_num_cells']
+            display_image(axes[row, 2], ground_truth, f'Ground Truth\n{gt_cells} cells', cmap='viridis')
         
         # Model predictions and error overlays
         for row, (model_name, prediction) in enumerate(predictions.items()):
             if row >= n_rows:
                 break
                 
-            error_analysis = error_results[model_name]
+            error_analysis = error_results[model_name]['error_analysis']
             
-            # Column 2: Model prediction
+            # Column 3: Model prediction
             pred_cells = error_analysis['summary']['pred_num_cells']
             fn_count = error_analysis['false_negatives']['count']
             fp_count = error_analysis['false_positives']['count']
             
             pred_title = f"{model_name.upper()}\n{pred_cells} cells"
-            display_image(axes[row, 2], prediction, pred_title, cmap='viridis')
+            display_image(axes[row, 3], prediction, pred_title, cmap='viridis')
             
-            # Column 3: Error overlay
+            # Column 4: Error overlay
             error_overlay = self.create_error_overlay(ground_truth, prediction, error_analysis)
             
             # Create better background for overlay visibility
@@ -177,9 +270,9 @@ class VisualInspector:
                 blended[border_mask] = blended[border_mask] * 0.7  # Darken border
             
             error_title = f"Errors: FN={fn_count}, FP={fp_count}\nRED=FN, BLUE=FP, GREEN=TP"
-            axes[row, 3].imshow(blended)
-            axes[row, 3].set_title(error_title, fontweight='bold', fontsize=10)
-            axes[row, 3].axis('off')
+            axes[row, 4].imshow(blended)
+            axes[row, 4].set_title(error_title, fontweight='bold', fontsize=10)
+            axes[row, 4].axis('off')
         
         plt.suptitle(f'Enhanced Model Comparison with Error Analysis - {image_name}', fontsize=16, fontweight='bold')
         
@@ -360,6 +453,164 @@ class VisualInspector:
         if save_path:
             fig.savefig(save_path, dpi=self.config['dpi'], bbox_inches='tight')
             self.logger.info(f"Modality comparison saved to {save_path}")
+        
+        return fig
+    
+    def create_compact_comparison(self, original_image, ground_truth, predictions, error_results, image_name, save_path=None):
+        """Create compact comparison with spacing, clean legend, horizontal headers"""
+        n_models = len(predictions)
+        n_cols = 4  # Original, Ground Truth, Prediction, Error Analysis
+        n_rows = n_models  # One row per model
+        
+        # Create figure with spacing between subplots and extra space for legend bar
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, 5*n_rows + 1))
+        if n_rows == 1:
+            axes = axes.reshape(1, -1)
+        
+        # Add spacing between subplots
+        plt.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.15, wspace=0.05, hspace=0.1)
+        
+        # Get target size from ground truth
+        target_height, target_width = ground_truth.shape[:2]
+        
+        # Resize original image to match ground truth size
+        if original_image.shape[:2] != (target_height, target_width):
+            if len(original_image.shape) == 3:
+                original_image = resize(original_image, (target_height, target_width, original_image.shape[2]), 
+                                      preserve_range=True, anti_aliasing=True)
+            else:
+                original_image = resize(original_image, (target_height, target_width), 
+                                      preserve_range=True, anti_aliasing=True)
+        
+        # Handle image display with proper contrast
+        def display_image(ax, img, cmap=None):
+            if len(img.shape) == 3 and img.shape[2] == 3:
+                # RGB image - check if grayscale stored as RGB
+                if np.allclose(img[:,:,0], img[:,:,1]) and np.allclose(img[:,:,1], img[:,:,2]):
+                    # Enhance contrast for grayscale
+                    img_display = img[:,:,0]
+                    img_min, img_max = np.percentile(img_display, [2, 98])
+                    if img_max > img_min:
+                        img_display = np.clip((img_display - img_min) / (img_max - img_min), 0, 1)
+                    ax.imshow(img_display, cmap='gray')
+                else:
+                    ax.imshow(img)
+            else:
+                ax.imshow(img, cmap=cmap)
+            ax.axis('off')
+        
+        # Add column headers closer to the images (horizontal)
+        column_titles = ['Original Image', 'Ground Truth', 'Prediction', 'Error Analysis']
+        for col, title in enumerate(column_titles):
+            # Add horizontal text for column headers closer to images
+            fig.text(0.125 + col * 0.225, 0.93, title, 
+                    fontsize=16, fontweight='bold',
+                    horizontalalignment='center', verticalalignment='center')
+        
+        # Process each model
+        for row, (model_name, prediction) in enumerate(predictions.items()):
+            error_analysis = error_results[model_name]['error_analysis']
+            
+            # Column 0: Original Image (same for all rows)
+            display_image(axes[row, 0], original_image)
+            
+            # Column 1: Ground Truth (same for all rows)
+            display_image(axes[row, 1], ground_truth, cmap='viridis')
+            
+            # Column 2: Model prediction
+            display_image(axes[row, 2], prediction, cmap='viridis')
+            
+            # Column 3: Error overlay
+            error_overlay = self.create_error_overlay(ground_truth, prediction, error_analysis)
+            
+            # Create better background for overlay visibility
+            if len(original_image.shape) == 3:
+                if np.allclose(original_image[:,:,0], original_image[:,:,1]):
+                    # Grayscale stored as RGB - normalize properly
+                    base_img = original_image[:,:,0].astype(np.float32)
+                    if base_img.max() > 1.0:
+                        base_img = base_img / 255.0  # Normalize to [0,1]
+                    
+                    # Enhance contrast
+                    img_min, img_max = np.percentile(base_img, [2, 98])
+                    if img_max > img_min:
+                        base_img = np.clip((base_img - img_min) / (img_max - img_min), 0, 1)
+                    
+                    # Check if image is mostly bright (inverted microscopy)
+                    mean_intensity = np.mean(base_img)
+                    if mean_intensity > 0.7:  # Mostly bright image
+                        # Use darker background and invert if needed
+                        base_img = 1.0 - base_img  # Invert
+                        base_img = np.stack([base_img, base_img, base_img], axis=2) * 0.3
+                    else:
+                        # Normal dark background
+                        base_img = np.stack([base_img, base_img, base_img], axis=2) * 0.3
+                else:
+                    # True RGB image
+                    base_img = original_image.astype(np.float32)
+                    if base_img.max() > 1.0:
+                        base_img = base_img / 255.0
+                    base_img = base_img * 0.3
+            else:
+                # Grayscale image
+                base_img = original_image.astype(np.float32)
+                if base_img.max() > 1.0:
+                    base_img = base_img / 255.0
+                
+                # Check brightness and handle inverted microscopy
+                mean_intensity = np.mean(base_img)
+                if mean_intensity > 0.7:
+                    base_img = 1.0 - base_img  # Invert bright images
+                
+                base_img = np.stack([base_img, base_img, base_img], axis=2) * 0.3
+            
+            # Blend with high contrast overlay
+            blended = np.clip(base_img + error_overlay * 0.9, 0, 1)
+            
+            # Ensure overlay is visible by adding a slight dark outline
+            overlay_mask = np.sum(error_overlay, axis=2) > 0
+            if np.sum(overlay_mask) > 0:
+                # Add subtle dark border around overlay regions for visibility
+                from scipy import ndimage
+                dilated_mask = ndimage.binary_dilation(overlay_mask, iterations=1)
+                border_mask = dilated_mask & ~overlay_mask
+                blended[border_mask] = blended[border_mask] * 0.7  # Darken border
+            
+            axes[row, 3].imshow(blended)
+            axes[row, 3].axis('off')
+            
+            # Add model name on the left side of the row (vertical text) - bigger font
+            axes[row, 0].text(-0.15, 0.5, model_name.upper(), 
+                            transform=axes[row, 0].transAxes, 
+                            fontsize=16, fontweight='bold',
+                            rotation=90,
+                            verticalalignment='center',
+                            horizontalalignment='center')
+        
+        # Create compact legend with colored circles at the bottom
+        legend_y = 0.08
+        legend_height = 0.06
+        
+        # Create legend with circles and short labels
+        legend_colors = ['red', 'blue', 'green']
+        legend_labels = ['FN', 'FP', 'TP']  # Short labels
+        
+        for i, (color, label) in enumerate(zip(legend_colors, legend_labels)):
+            x_pos = 0.15 + i * 0.15  # Closer spacing
+            # Create colored circle
+            from matplotlib.patches import Circle
+            circle = Circle((x_pos + 0.01, legend_y + legend_height/2), 0.012, 
+                          facecolor=color, edgecolor='black', linewidth=1,
+                          transform=fig.transFigure)
+            fig.add_artist(circle)
+            # Add label text (bigger font, closer to circle)
+            fig.text(x_pos + 0.03, legend_y + legend_height/2, label, 
+                    fontsize=14, fontweight='bold',
+                    horizontalalignment='left', verticalalignment='center')
+        
+        if save_path:
+            fig.savefig(save_path, dpi=200, bbox_inches='tight')
+            self.logger.info(f"Compact comparison saved to {save_path}")
         
         return fig
     

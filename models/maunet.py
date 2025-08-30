@@ -253,6 +253,13 @@ class MAUNet(nn.Module):
             in_channels=feature_size2,
             out_channels=1  # Single channel for distance transform
         )
+        
+        # NEW: centroid (seed) prediction head (1 channel)
+        self.out_centroid = UnetOutBlock(
+            spatial_dims=spatial_dims,
+            in_channels=feature_size2,
+            out_channels=1  # Single channel for centroid heatmap
+        )
 
     def forward(self, x_in):
         x = self.res.conv1(x_in)
@@ -293,7 +300,10 @@ class MAUNet(nn.Module):
         dec0_2 = self.decoder1_2(dec1_2, enc0)
         logits_2 = self.out_2(dec0_2)
         
-        return logits, logits_2, emb
+        # NEW: centroid logits share the same decoder branch as DT
+        logits_c = self.out_centroid(dec0_2)
+        
+        return logits, logits_2, logits_c
 
 
 def create_maunet_model(
@@ -362,11 +372,21 @@ class MAUNetEnsemble(nn.Module):
     def forward(self, x: torch.Tensor):
         class_logits_list: List[torch.Tensor] = []
         reg_logits_list: List[torch.Tensor] = []
+        centroid_logits_list: List[torch.Tensor] = []
 
         for model in self.models:
-            logits_cls, logits_reg, _ = model(x)
+            outputs = model(x)
+            if isinstance(outputs, (list, tuple)) and len(outputs) == 3:
+                logits_cls, logits_reg, logits_c = outputs
+            else:
+                # Backward compatibility (2 heads)
+                logits_cls, logits_reg = outputs
+                logits_c = None
+            
             class_logits_list.append(logits_cls)
             reg_logits_list.append(logits_reg)
+            if logits_c is not None:
+                centroid_logits_list.append(logits_c)
 
         # Stack along new dim and reduce
         class_stack = torch.stack(class_logits_list, dim=0)
@@ -380,7 +400,16 @@ class MAUNetEnsemble(nn.Module):
             class_logits = class_stack.sum(dim=0)
             reg_logits = reg_stack.sum(dim=0)
 
-        return class_logits, reg_logits
+        # Handle centroid logits if available
+        if centroid_logits_list:
+            centroid_stack = torch.stack(centroid_logits_list, dim=0)
+            if self.average:
+                centroid_logits = centroid_stack.mean(dim=0)
+            else:
+                centroid_logits = centroid_stack.sum(dim=0)
+            return class_logits, reg_logits, centroid_logits
+        else:
+            return class_logits, reg_logits
 
 
 def create_maunet_ensemble_model(

@@ -8,7 +8,10 @@ from scipy import ndimage
 from skimage import morphology, segmentation, measure
 import logging
 
-from config.analysis_config import ANALYSIS_CONFIG, IMAGE_CONFIG
+try:
+    from config.analysis_config import ANALYSIS_CONFIG, IMAGE_CONFIG
+except ImportError:
+    from analysis_config import ANALYSIS_CONFIG, IMAGE_CONFIG
 
 class ErrorAnalyzer:
     """Analyzes and categorizes different types of segmentation errors"""

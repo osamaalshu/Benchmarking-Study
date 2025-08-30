@@ -1,0 +1,79 @@
+% PNG Chart Figures for Thesis
+% Use these instead of the TikZ/PGF versions for better visual quality
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{latex_tables_figures/png_figures/performance_comparison.png}
+\caption{Model Performance Comparison Across Key Metrics}
+\label{fig:performance_comparison_png}
+\begin{quote}
+\small
+Comparative bar chart showing F1-Score, Panoptic Quality (PQ), and Precision across all evaluated models. MAUNet architectures demonstrate superior performance, with MAUNet-Wide achieving the highest F1-Score (0.529), MAUNet-Ensemble achieving the highest precision (0.632) and PQ (0.437). Traditional architectures (U-Net, nnU-Net) show moderate performance, while SAC exhibits poor performance across all metrics. The chart clearly illustrates the effectiveness of multi-scale attention mechanisms in cell instance segmentation tasks.
+\end{quote}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{latex_tables_figures/png_figures/error_distribution.png}
+\caption{Error Type Distribution Across Models}
+\label{fig:error_distribution_png}
+\begin{quote}
+\small
+Stacked bar chart showing the distribution of different error types across all evaluated models, ordered by total error count (lowest to highest). Key observations: (1) False negatives (red) dominate error patterns across all models, constituting the primary challenge; (2) MAUNet variants show significantly lower total errors with MAUNet-Ensemble achieving the best overall error profile; (3) LSTM-UNet suffers from high false positive rates (orange); (4) Split and merge errors (green and purple) are relatively rare across all architectures. This visualization guides optimization efforts by highlighting that detection sensitivity, rather than boundary refinement, represents the primary target for improvement.
+\end{quote}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.9\textwidth]{latex_tables_figures/png_figures/precision_recall_analysis.png}
+\caption{Precision vs Recall Trade-off Analysis}
+\label{fig:precision_recall_png}
+\begin{quote}
+\small
+Scatter plot showing the precision-recall trade-off for all evaluated models, with F1-score contour lines (gray dashed lines) indicating performance levels. MAUNet-Ensemble achieves the highest precision (0.632) but moderate recall, while MAUNet-Wide achieves better balance with higher recall (0.470) and competitive precision (0.605). Traditional models cluster in the lower-left region, indicating both precision and recall limitations. The visualization reveals that MAUNet architectures successfully navigate the precision-recall trade-off, with different variants optimizing for different aspects of performance.
+\end{quote}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{latex_tables_figures/png_figures/panoptic_quality_breakdown.png}
+\caption{Panoptic Quality Component Analysis}
+\label{fig:panoptic_quality_breakdown_png}
+\begin{quote}
+\small
+(Left) Breakdown of Panoptic Quality into Recognition Quality (RQ) and Segmentation Quality (SQ) components, where PQ = RQ × SQ. (Right) Scatter plot showing the trade-off between detection performance (RQ) and segmentation accuracy (SQ). MAUNet-Ensemble achieves the highest segmentation quality, indicating superior IoU performance on matched instances, while MAUNet-Wide excels in recognition quality, demonstrating better detection capabilities. The analysis reveals that different MAUNet variants optimize different aspects of the segmentation pipeline, with ensemble methods favoring segmentation precision and wide networks favoring detection sensitivity.
+\end{quote}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{latex_tables_figures/png_figures/model_ranking_heatmap.png}
+\caption{Comprehensive Model Performance Heatmap}
+\label{fig:model_ranking_heatmap_png}
+\begin{quote}
+\small
+Heatmap visualization showing performance across all key metrics for comprehensive model comparison. Green indicates higher performance, red indicates lower performance. The visualization clearly demonstrates the superiority of MAUNet architectures (bottom three rows) across all metrics, with particularly strong performance in precision and panoptic quality. Traditional architectures show moderate performance (middle rows), while SAC (top row) exhibits consistently poor performance. This comprehensive view enables quick identification of model strengths and weaknesses across multiple evaluation criteria, supporting informed model selection decisions.
+\end{quote}
+\end{figure}
+
+% Alternative: Individual metric comparisons
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{latex_tables_figures/png_figures/performance_comparison.png}
+    \caption{Overall Performance Metrics}
+    \label{fig:performance_sub}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{latex_tables_figures/png_figures/error_distribution.png}
+    \caption{Error Type Distribution}
+    \label{fig:error_sub}
+\end{subfigure}
+\caption{Model Performance and Error Analysis Summary}
+\label{fig:combined_analysis}
+\begin{quote}
+\small
+Combined visualization showing (a) overall performance metrics comparison and (b) error type distribution across models. The complementary views demonstrate that superior F1-scores correlate with reduced error counts, particularly in false negatives and false positives. MAUNet architectures consistently outperform traditional approaches in both performance metrics and error minimization.
+\end{quote}
+\end{figure}

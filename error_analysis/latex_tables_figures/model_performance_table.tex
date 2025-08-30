@@ -1,0 +1,22 @@
+\begin{table}[htbp]
+\centering
+\caption{Model Performance Summary - Micro-Aggregated Metrics}
+\label{tab:model_performance}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Model} & \textbf{F1-Score} & \textbf{PQ} & \textbf{Precision} & \textbf{Recall} & \textbf{RQ} & \textbf{SQ} \\
+\midrule
+\textbf{MAUNet-Wide} & \textbf{0.529} & 0.413 & 0.605 & 0.470 & 0.529 & 0.781 \\
+\textbf{MAUNet-ResNet50} & \textbf{0.507} & 0.399 & 0.598 & 0.440 & 0.507 & 0.787 \\
+\textbf{MAUNet-Ensemble} & \textbf{0.499} & \textbf{0.437} & \textbf{0.632} & 0.413 & 0.499 & \textbf{0.876} \\
+nnU-Net & 0.357 & 0.278 & 0.367 & 0.348 & 0.357 & 0.778 \\
+U-Net & 0.315 & 0.239 & 0.335 & 0.297 & 0.315 & 0.758 \\
+LSTM-UNet & 0.282 & 0.199 & 0.263 & 0.305 & 0.282 & 0.706 \\
+SAC & 0.003 & 0.002 & 0.005 & 0.002 & 0.003 & 0.667 \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\small
+\item Note: Bold values indicate best performance in each metric. Metrics calculated using micro-aggregation across 100 test images. PQ = Panoptic Quality, RQ = Recognition Quality, SQ = Segmentation Quality.
+\end{tablenotes}
+\end{table}

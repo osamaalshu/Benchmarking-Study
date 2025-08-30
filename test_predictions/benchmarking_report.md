@@ -80,6 +80,8 @@ _Figure 3: Training epochs and final loss comparison across models_
 
 - **Learning Rate**: 6e-4 (all models)
 
+
+
 ## Sample Segmentation Results
 
 ### Qualitative Comparison

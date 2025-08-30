@@ -8,7 +8,10 @@ from typing import Dict, List, Tuple, Optional
 from sklearn.calibration import calibration_curve
 import logging
 
-from config.analysis_config import ANALYSIS_CONFIG, IMAGE_CONFIG
+try:
+    from config.analysis_config import ANALYSIS_CONFIG, IMAGE_CONFIG
+except ImportError:
+    from analysis_config import ANALYSIS_CONFIG, IMAGE_CONFIG
 
 class CalibrationAnalyzer:
     """Analyzes model calibration and confidence through reliability diagrams and ECE"""

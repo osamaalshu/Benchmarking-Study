@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Base paths
 BASE_DIR = Path(__file__).parent.parent.parent
-ERROR_ANALYSIS_DIR = BASE_DIR / "Error Analysis and Interpretability"
+ERROR_ANALYSIS_DIR = BASE_DIR / "error_analysis"
 
 # Data paths
 TEST_IMAGES_PATH = BASE_DIR / "data" / "test" / "images"

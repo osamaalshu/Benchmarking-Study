@@ -358,9 +358,6 @@ The `synthesis_augmentation_study/` directory contains a comprehensive study on 
 - **Error Analysis**: Comprehensive framework for model evaluation and debugging
 - **Augmentation Study**: Systematic investigation of synthetic data augmentation strategies
 
-## Contributing
-
-This project is part of the NeurIPS Cell Segmentation Challenge. For questions or issues, please refer to the challenge documentation.
 
 ## Recent Updates
 

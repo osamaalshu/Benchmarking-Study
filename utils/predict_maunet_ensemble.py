@@ -42,11 +42,13 @@ import cv2
 # Add models to path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'models'))
 from models.maunet import create_maunet_model
+from models.maunet_error_aware import create_maunet_error_aware_model
 
-def sophisticated_postprocessing(prob_background, prob_interior, distance_map):
+def sophisticated_postprocessing(prob_background, prob_interior, distance_map, centroid_map=None):
     """
     Sophisticated post-processing based on the original saltfish team's approach
     Uses watershed, peak detection, and morphological operations
+    Enhanced with centroid peaks for better instance separation
     """
     # Convert probabilities to binary masks
     interior_mask = prob_interior > 0.7
@@ -71,14 +73,27 @@ def sophisticated_postprocessing(prob_background, prob_interior, distance_map):
     # Gaussian blur on distance map
     blurred_distance = cv2.GaussianBlur(distance_map, (kernel_size, kernel_size), 0)
     
-    # Find local maxima (cell centers)
+    # Find local maxima (cell centers) - combine DT and centroid peaks
     min_distance = max(1, int(kernel_size / 4))
-    local_maxima = peak_local_maxima(
+    dt_peaks = peak_local_maxima(
         blurred_distance, 
         indices=False, 
         min_distance=min_distance,
         threshold_rel=0.6
     )
+    
+    # Add centroid peaks if available
+    if centroid_map is not None:
+        centroid_peaks = peak_local_maxima(
+            centroid_map,
+            indices=False,
+            min_distance=min_distance,
+            threshold_rel=0.3  # Lower threshold for centroid detection
+        )
+        # Combine peaks (union)
+        local_maxima = dt_peaks | centroid_peaks
+    else:
+        local_maxima = dt_peaks
     
     # Create watershed markers
     # Method 1: High confidence regions
@@ -147,11 +162,19 @@ def normalize_channel(img, lower=1, upper=99):
         img_norm = img
     return img_norm.astype(np.uint8)
 
-def load_maunet_models(device, resnet50_path, wideresnet50_path, num_classes=3, input_size=256):
+def load_maunet_models(device, resnet50_path, wideresnet50_path, num_classes=3, input_size=256, model_type="maunet"):
     """Load both ResNet50 and Wide-ResNet50 MAUNet models"""
     
+    # Choose model creation function based on type
+    if model_type == "maunet_error_aware":
+        create_model_func = create_maunet_error_aware_model
+        print("🔧 Loading Error-Aware MAUNet models (3 outputs: seg, dt, centroid)")
+    else:
+        create_model_func = create_maunet_model
+        print("🔧 Loading standard MAUNet models (2 outputs: seg, dt)")
+    
     # Load ResNet50 MAUNet
-    model_resnet50 = create_maunet_model(
+    model_resnet50 = create_model_func(
         num_classes=num_classes,
         input_size=input_size,
         in_channels=3,
@@ -161,12 +184,12 @@ def load_maunet_models(device, resnet50_path, wideresnet50_path, num_classes=3, 
     if os.path.exists(resnet50_path):
         checkpoint = torch.load(resnet50_path, map_location=device, weights_only=False)
         model_resnet50.load_state_dict(checkpoint['model_state_dict'])
-        print(f"✅ Loaded ResNet50 MAUNet from {resnet50_path}")
+        print(f"✅ Loaded ResNet50 {model_type} from {resnet50_path}")
     else:
         raise FileNotFoundError(f"ResNet50 checkpoint not found: {resnet50_path}")
     
     # Load Wide-ResNet50 MAUNet
-    model_wide_resnet50 = create_maunet_model(
+    model_wide_resnet50 = create_model_func(
         num_classes=num_classes,
         input_size=input_size,
         in_channels=3,
@@ -176,43 +199,70 @@ def load_maunet_models(device, resnet50_path, wideresnet50_path, num_classes=3, 
     if os.path.exists(wideresnet50_path):
         checkpoint = torch.load(wideresnet50_path, map_location=device, weights_only=False)
         model_wide_resnet50.load_state_dict(checkpoint['model_state_dict'])
-        print(f"✅ Loaded Wide-ResNet50 MAUNet from {wideresnet50_path}")
+        print(f"✅ Loaded Wide-ResNet50 {model_type} from {wideresnet50_path}")
     else:
         raise FileNotFoundError(f"Wide-ResNet50 checkpoint not found: {wideresnet50_path}")
     
     return model_resnet50, model_wide_resnet50
 
-def ensemble_predict_single_scale(tensor, models, roi_size, sw_batch_size):
+def ensemble_predict_single_scale(tensor, models, roi_size, sw_batch_size, model_type="maunet"):
     """Predict using ensemble of models at single scale"""
     ensemble_seg_output = None
     ensemble_dist_output = None
+    ensemble_centroid_output = None
     
     for model in models:
-        # MAUNet returns (segmentation, distance_transform)
-        # Call SWI twice - once for each output head to avoid stitching issues
-        seg_output = sliding_window_inference(
-            tensor, roi_size, sw_batch_size, 
-            lambda x: model(x)[0],  # Segmentation head only
-            padding_mode="reflect"
-        )
-        dist_output = sliding_window_inference(
-            tensor, roi_size, sw_batch_size, 
-            lambda x: model(x)[1],  # Distance transform head only
-            padding_mode="reflect"
-        )
+        # Get model outputs
+        if model_type == "maunet_error_aware":
+            # Error-Aware MAUNet returns (segmentation, distance_transform, centroid)
+            seg_output = sliding_window_inference(
+                tensor, roi_size, sw_batch_size, 
+                lambda x: model(x)[0],  # Segmentation head only
+                padding_mode="reflect"
+            )
+            dist_output = sliding_window_inference(
+                tensor, roi_size, sw_batch_size, 
+                lambda x: model(x)[1],  # Distance transform head only
+                padding_mode="reflect"
+            )
+            centroid_output = sliding_window_inference(
+                tensor, roi_size, sw_batch_size, 
+                lambda x: model(x)[2],  # Centroid head only
+                padding_mode="reflect"
+            )
+        else:
+            # Standard MAUNet returns (segmentation, distance_transform)
+            seg_output = sliding_window_inference(
+                tensor, roi_size, sw_batch_size, 
+                lambda x: model(x)[0],  # Segmentation head only
+                padding_mode="reflect"
+            )
+            dist_output = sliding_window_inference(
+                tensor, roi_size, sw_batch_size, 
+                lambda x: model(x)[1],  # Distance transform head only
+                padding_mode="reflect"
+            )
+            centroid_output = None
         
+        # Accumulate outputs
         if ensemble_seg_output is None:
             ensemble_seg_output = seg_output
             ensemble_dist_output = dist_output
+            if centroid_output is not None:
+                ensemble_centroid_output = centroid_output
         else:
             ensemble_seg_output += seg_output
             ensemble_dist_output += dist_output
+            if centroid_output is not None:
+                ensemble_centroid_output += centroid_output
     
     # Average the ensemble predictions
     ensemble_seg_output /= len(models)
     ensemble_dist_output /= len(models)
+    if ensemble_centroid_output is not None:
+        ensemble_centroid_output /= len(models)
     
-    return ensemble_seg_output, ensemble_dist_output
+    return ensemble_seg_output, ensemble_dist_output, ensemble_centroid_output
 
 def main():
     parser = argparse.ArgumentParser('MAUNet Ensemble Prediction with Multi-Scale Inference')
@@ -236,6 +286,11 @@ def main():
                        help='Use multi-scale inference (1.0, 1.25, 1.5)')
     parser.add_argument('--use_sophisticated_postprocessing', action='store_true',
                        help='Use sophisticated post-processing like original saltfish team')
+    
+    # Model type
+    parser.add_argument('--model_type', type=str, default='maunet',
+                       choices=['maunet', 'maunet_error_aware'],
+                       help='Type of MAUNet model to use')
     
     # Ensemble model paths
     parser.add_argument('--resnet50_path', type=str,
@@ -263,9 +318,9 @@ def main():
     print(f"Found {len(img_names)} images to process")
     
     # Load ensemble models
-    print("Loading MAUNet ensemble models...")
+    print(f"Loading {args.model_type} ensemble models...")
     model_resnet50, model_wide_resnet50 = load_maunet_models(
-        device, args.resnet50_path, args.wideresnet50_path, args.num_class, args.input_size
+        device, args.resnet50_path, args.wideresnet50_path, args.num_class, args.input_size, args.model_type
     )
     models = [model_resnet50, model_wide_resnet50]
     
@@ -317,6 +372,10 @@ def main():
             # Initialize ensemble outputs
             ensemble_seg_output = torch.zeros(b, args.num_class, h, w).to(device)
             ensemble_dist_output = torch.zeros(b, 1, h, w).to(device)
+            if args.model_type == "maunet_error_aware":
+                ensemble_centroid_output = torch.zeros(b, 1, h, w).to(device)
+            else:
+                ensemble_centroid_output = None
             
             # Multi-scale inference
             total_predictions = 0
@@ -332,30 +391,38 @@ def main():
                     )
                     
                     # Ensemble prediction at this scale
-                    seg_out, dist_out = ensemble_predict_single_scale(
-                        scaled_tensor, models, roi_size, sw_batch_size
+                    seg_out, dist_out, centroid_out = ensemble_predict_single_scale(
+                        scaled_tensor, models, roi_size, sw_batch_size, args.model_type
                     )
                     
                     # Resize back to original size
                     seg_out = F.interpolate(seg_out, (h, w), mode='bilinear', align_corners=True)
                     dist_out = F.interpolate(dist_out, (h, w), mode='bilinear', align_corners=True)
+                    if centroid_out is not None:
+                        centroid_out = F.interpolate(centroid_out, (h, w), mode='bilinear', align_corners=True)
                     
                     # Accumulate
                     ensemble_seg_output += seg_out
                     ensemble_dist_output += dist_out
+                    if centroid_out is not None and ensemble_centroid_output is not None:
+                        ensemble_centroid_output += centroid_out
                     total_predictions += 1
             else:
                 # Single scale for large images
-                seg_out, dist_out = ensemble_predict_single_scale(
-                    test_tensor, models, roi_size, sw_batch_size
+                seg_out, dist_out, centroid_out = ensemble_predict_single_scale(
+                    test_tensor, models, roi_size, sw_batch_size, args.model_type
                 )
                 ensemble_seg_output += seg_out
                 ensemble_dist_output += dist_out
+                if centroid_out is not None and ensemble_centroid_output is not None:
+                    ensemble_centroid_output += centroid_out
                 total_predictions += 1
             
             # Average ensemble predictions
             ensemble_seg_output /= total_predictions
             ensemble_dist_output /= total_predictions
+            if ensemble_centroid_output is not None:
+                ensemble_centroid_output /= total_predictions
             
             # Apply softmax to segmentation output
             ensemble_seg_output = torch.nn.functional.softmax(ensemble_seg_output, dim=1)
@@ -363,6 +430,9 @@ def main():
             # Convert to numpy
             seg_probs = ensemble_seg_output[0].cpu().numpy()  # (C, H, W)
             dist_map = ensemble_dist_output[0, 0].cpu().numpy()  # (H, W)
+            centroid_map = None
+            if ensemble_centroid_output is not None:
+                centroid_map = torch.sigmoid(ensemble_centroid_output[0, 0]).cpu().numpy()  # (H, W)
             
             # Post-processing
             if args.use_sophisticated_postprocessing and args.num_class >= 3:
@@ -371,7 +441,7 @@ def main():
                 prob_interior = seg_probs[1]    # Interior
                 
                 final_mask = sophisticated_postprocessing(
-                    prob_background, prob_interior, dist_map
+                    prob_background, prob_interior, dist_map, centroid_map
                 )
             else:
                 # Simple post-processing

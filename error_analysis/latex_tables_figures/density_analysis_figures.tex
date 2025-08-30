@@ -1,0 +1,83 @@
+% Density-Based Performance Analysis Figures
+% These charts analyze the relationship between cell density and model performance
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{latex_tables_figures/png_figures/density_performance_analysis.png}
+\caption{Cell Density Impact on Model Performance}
+\label{fig:density_performance_analysis}
+\begin{quote}
+\small
+Comprehensive analysis of how cell density affects model performance across four key aspects: (Top Left) F1-score vs density categories showing performance degradation with increasing cell density; (Top Right) Success rate percentage (F1 > 0.5) by density, revealing that MAUNet variants maintain higher success rates even in high-density scenarios; (Bottom Left) Error rate per ground truth cell vs density, demonstrating that error rates increase with cell density but MAUNet architectures show better resilience; (Bottom Right) Distribution of cell densities in the dataset, showing the range from sparse (0-200 cells) to very dense (800+ cells) images. Key finding: Cell density is a critical factor affecting all models, but MAUNet variants show superior robustness across density ranges.
+\end{quote}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{latex_tables_figures/png_figures/image_level_success_rates.png}
+\caption{Image-Level Performance Analysis and Success Rates}
+\label{fig:image_level_success_rates}
+\begin{quote}
+\small
+Analysis of model performance at the individual image level: (Left) Success rate curves showing the percentage of images achieving different F1-score thresholds. MAUNet-Ensemble achieves the highest success rates at stringent thresholds (≥0.6, ≥0.7), while MAUNet-Wide shows better performance at moderate thresholds. Traditional models (U-Net, nnU-Net) show lower success rates across all thresholds, with SAC performing poorly. (Right) Distribution of F1-scores across all images, with the red dashed line indicating the success threshold (0.5). The distributions reveal that MAUNet variants achieve consistently higher performance, with MAUNet-Ensemble showing a right-skewed distribution indicating frequent high-performance results. This analysis demonstrates that superior average performance translates to higher success rates at the image level.
+\end{quote}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{latex_tables_figures/png_figures/challenging_vs_easy_analysis.png}
+\caption{Challenging vs Easy Images Performance Analysis}
+\label{fig:challenging_vs_easy_analysis}
+\begin{quote}
+\small
+Comprehensive analysis of model performance on challenging versus easy images: (Top Left) Performance breakdown by image difficulty categories, where images are classified based on average F1-scores across all models. MAUNet variants maintain relatively stable performance across difficulty levels, while traditional models show significant performance drops on challenging images. (Top Right) Distribution of image difficulty in the dataset, showing 24.0\% very hard, 31.0\% hard, 28.0\% medium, and 17.0\% easy images. (Bottom Left) Model robustness measured by F1-score standard deviation - lower values indicate more consistent performance across image difficulties. MAUNet-Ensemble shows the highest consistency. (Bottom Right) Success rate comparison between hard images (F1>0.3 threshold) and easy images (F1>0.5 threshold), demonstrating that MAUNet variants achieve significantly higher success rates on both challenging and easy cases compared to traditional approaches.
+\end{quote}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{latex_tables_figures/png_figures/density_correlation_analysis.png}
+\caption{Cell Density Correlation Analysis}
+\label{fig:density_correlation_analysis}
+\begin{quote}
+\small
+Detailed correlation analysis between cell density and performance metrics: (Top Row) Scatter plots showing the relationship between ground truth cell count and F1-score, precision, and recall for the top 4 performing models. Dashed trend lines reveal negative correlations between density and performance metrics, with MAUNet variants showing more resilient performance curves. (Bottom Right) Correlation coefficient heatmap quantifying the strength of relationships between cell density and performance metrics for each model. Negative correlations (red) indicate performance degradation with increasing density. Key insights: (1) All models show performance degradation with increasing cell density, but MAUNet variants demonstrate better resilience; (2) Precision is more affected by density than recall across most models; (3) MAUNet-Wide shows the most stable performance-density relationship, making it optimal for diverse density scenarios.
+\end{quote}
+\end{figure}
+
+% Alternative: Combined figure with subfigures
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{latex_tables_figures/png_figures/density_performance_analysis.png}
+    \caption{Density Performance Analysis}
+    \label{fig:density_sub}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{latex_tables_figures/png_figures/image_level_success_rates.png}
+    \caption{Image-Level Success Rates}
+    \label{fig:success_sub}
+\end{subfigure}
+
+\vspace{0.5cm}
+
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{latex_tables_figures/png_figures/challenging_vs_easy_analysis.png}
+    \caption{Challenging vs Easy Analysis}
+    \label{fig:difficulty_sub}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{latex_tables_figures/png_figures/density_correlation_analysis.png}
+    \caption{Density Correlation Analysis}
+    \label{fig:correlation_sub}
+\end{subfigure}
+
+\caption{Comprehensive Density and Image-Level Performance Analysis}
+\label{fig:comprehensive_density_analysis}
+\begin{quote}
+\small
+Complete analysis suite examining the relationship between image characteristics and model performance: (a) Cell density impact analysis showing performance degradation with increasing density but superior MAUNet resilience; (b) Image-level success rate analysis revealing consistent MAUNet superiority across performance thresholds; (c) Challenging vs easy image analysis demonstrating MAUNet robustness across difficulty levels; (d) Correlation analysis quantifying density-performance relationships. Together, these analyses demonstrate that while cell density significantly impacts all models, MAUNet architectures maintain superior and more consistent performance across diverse imaging conditions.
+\end{quote}
+\end{figure}
