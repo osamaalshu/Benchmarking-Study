@@ -633,6 +633,9 @@ def main():
                 # Centroid BCE (if head present)
                 if center_logits is not None:
                     center_target = make_centroid_map(labels)
+                    # Ensure same shape as center_logits
+                    if center_target.shape != center_logits.shape:
+                        center_target = center_target.expand_as(center_logits)
                     L_center = F.binary_cross_entropy_with_logits(center_logits, center_target)
                 else:
                     L_center = torch.tensor(0.0, device=inputs.device)
