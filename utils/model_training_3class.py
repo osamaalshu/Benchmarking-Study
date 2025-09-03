@@ -246,12 +246,11 @@ def main():
         synthetic_gt_path = join(args.synthetic_data_path, "synthetic_labels_grayscale")
         
         if os.path.exists(synthetic_img_path) and os.path.exists(synthetic_gt_path):
-            # Get all synthetic images
+            # Get all synthetic images and select first 90
             synthetic_img_names = sorted([f for f in os.listdir(synthetic_img_path) if f.endswith('.png')])
-            # Select 10% of synthetic data (50 images from 500)
-            num_synthetic = min(50, len(synthetic_img_names))  # 10% of 500
-            np.random.seed(args.seed)  # Ensure reproducible selection
-            selected_synthetic = np.random.choice(synthetic_img_names, num_synthetic, replace=False)
+            # Select first 90 synthetic images to append to training data
+            num_synthetic = min(90, len(synthetic_img_names))
+            selected_synthetic = synthetic_img_names[:num_synthetic]
             
             print(f"Adding {num_synthetic} synthetic images to training set...")
             

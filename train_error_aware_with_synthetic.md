@@ -112,8 +112,8 @@ The trained models will be saved in:
 ## Training Data Composition:
 
 - **Real training data**: 1000 images
-- **Synthetic data added**: 50 images (10% of 500 available)
-- **Total training data**: 1050 images per backbone
+- **Synthetic data added**: 90 images (~10% of 1000 real images)
+- **Total training data**: 1090 images per backbone
 - **Validation data**: Unchanged (only real data)
 
 ## Model Architecture:
@@ -125,4 +125,4 @@ Both models will use the MAUNet Error-Aware architecture with:
 - Input size: 768x768
 - 3 classes (background, interior, boundary)
 
-The synthetic data integration happens automatically when the `--synthetic` flag is used, selecting 50 random synthetic images from the 500 available ones using a fixed seed for reproducibility.
+The synthetic data integration happens automatically when the `--synthetic` flag is used, selecting the first 90 synthetic images from the 500 available ones and appending them to the training data.
