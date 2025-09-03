@@ -179,6 +179,10 @@ def main():
     parser.add_argument("--lr_step_size", type=int, default=10, help="Learning rate decay step size")
     parser.add_argument("--load_checkpoint", action="store_true", help="Load from checkpoint")
     parser.add_argument("--checkpoint_path", type=str, help="Path to checkpoint file")
+    
+    # NEW: Synthetic data integration
+    parser.add_argument("--synthetic", action="store_true", help="Add 10% synthetic data to training set")
+    parser.add_argument("--synthetic_data_path", type=str, default="./data/synthetic_data_500", help="Path to synthetic data directory")
 
     args = parser.parse_args()
 
@@ -191,7 +195,10 @@ def main():
 
     #%% set training/validation split
     np.random.seed(args.seed)
-    model_path = join(args.work_dir, args.model_name + "_3class")
+    model_suffix = "_3class"
+    if args.synthetic:
+        model_suffix += "_synthetic"
+    model_path = join(args.work_dir, args.model_name + model_suffix)
     os.makedirs(model_path, exist_ok=True)
     run_id = datetime.now().strftime("%Y%m%d-%H%M")
     shutil.copyfile(
@@ -232,6 +239,39 @@ def main():
             if os.path.exists(dist_file):
                 sample["dist"] = dist_file
         val_files.append(sample)
+
+    # NEW: Add synthetic data if requested
+    if args.synthetic:
+        synthetic_img_path = join(args.synthetic_data_path, "synthetic_images_500")
+        synthetic_gt_path = join(args.synthetic_data_path, "synthetic_labels_grayscale")
+        
+        if os.path.exists(synthetic_img_path) and os.path.exists(synthetic_gt_path):
+            # Get all synthetic images
+            synthetic_img_names = sorted([f for f in os.listdir(synthetic_img_path) if f.endswith('.png')])
+            # Select 10% of synthetic data (50 images from 500)
+            num_synthetic = min(50, len(synthetic_img_names))  # 10% of 500
+            np.random.seed(args.seed)  # Ensure reproducible selection
+            selected_synthetic = np.random.choice(synthetic_img_names, num_synthetic, replace=False)
+            
+            print(f"Adding {num_synthetic} synthetic images to training set...")
+            
+            for img_name in selected_synthetic:
+                # Synthetic labels follow pattern: synthetic_XXXX_label.png
+                base_name = img_name.replace('.png', '')
+                label_name = base_name + "_label.png"
+                
+                synthetic_sample = {
+                    "img": join(synthetic_img_path, img_name),
+                    "label": join(synthetic_gt_path, label_name)
+                }
+                
+                # Check if synthetic label exists
+                if os.path.exists(synthetic_sample["label"]):
+                    train_files.append(synthetic_sample)
+                else:
+                    print(f"Warning: Label not found for {img_name}")
+        else:
+            print(f"Warning: Synthetic data path not found: {args.synthetic_data_path}")
 
     has_dist_train = all(["dist" in s for s in train_files]) and len(train_files) > 0
     has_dist_val = all(["dist" in s for s in val_files]) and len(val_files) > 0
