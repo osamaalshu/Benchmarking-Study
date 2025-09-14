@@ -98,3 +98,15 @@ synthesis_augmentation_study/*.png
 
 # Visualization results
 visualization_results/
+
+# Generated content (charts, reports, visualizations)
+**/generated/
+**/charts/
+**/plots/
+**/figures/
+**/*_report.html
+**/*_report.txt
+**/*_analysis.png
+**/*_comparison.png
+**/*_visualization.png
+**/*_chart.png
