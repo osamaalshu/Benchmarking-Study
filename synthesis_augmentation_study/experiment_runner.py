@@ -14,7 +14,7 @@ import sys
 import argparse
 import logging
 import json
-from augmentation_study.evaluation_framework import NumpyEncoder
+from .utils.evaluation_framework import NumpyEncoder
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 import time
@@ -54,7 +54,14 @@ class AugmentationStudyRunner:
         self.output_dir = Path(base_config['output_dir'])
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        self.arms_dir = self.output_dir / 'dataset_arms'
+        # Use existing dataset arms if available, otherwise create new ones
+        if base_config.get('use_existing_arms', True) and Path('fixed_dataset_arms').exists():
+            self.arms_dir = Path('fixed_dataset_arms')
+            self.logger.info(f"Using existing dataset arms from: {self.arms_dir}")
+        else:
+            self.arms_dir = self.output_dir / 'dataset_arms'
+            self.logger.info(f"Will create new dataset arms in: {self.arms_dir}")
+        
         self.training_dir = self.output_dir / 'training_results'
         self.evaluation_dir = self.output_dir / 'evaluation_results'
         
@@ -78,7 +85,23 @@ class AugmentationStudyRunner:
     def create_dataset_arms(self) -> bool:
         """Create all dataset arms"""
         try:
-            self.logger.info("Creating dataset arms...")
+            # Check if we're using existing arms
+            if self.arms_dir == Path('fixed_dataset_arms') and self.arms_dir.exists():
+                self.logger.info("Using existing dataset arms, skipping creation...")
+                
+                # Get existing arm paths
+                arm_dirs = [d for d in self.arms_dir.iterdir() if d.is_dir()]
+                arm_paths = {d.name: str(d) for d in arm_dirs}
+                
+                self.study_state['phase'] = 'dataset_arms_created'
+                self.study_state['completed_phases'].append('dataset_arms_created')
+                self.study_state['arm_paths'] = arm_paths
+                
+                self.logger.info(f"Using {len(arm_paths)} existing dataset arms: {list(arm_paths.keys())}")
+                return True
+            
+            # Create new arms if needed
+            self.logger.info("Creating new dataset arms...")
             
             self.data_arms_manager = DataArmsManager(
                 base_data_dir=self.config['train_data_dir'],
@@ -354,10 +377,10 @@ def create_default_config() -> Dict[str, Any]:
         'seeds': [0, 1, 2],
         'batch_size': 4,
         'initial_lr': 6e-4,
-        'max_epochs': 30,
+        'max_epochs': 20,
         'input_size': 256,
         'num_classes': 3,
-        'device': 'auto',
+        'device': 'mps',
         
         # Study configuration
         'seed': 42,

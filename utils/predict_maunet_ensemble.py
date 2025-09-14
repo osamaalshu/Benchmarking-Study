@@ -40,7 +40,7 @@ import tifffile as tif
 import cv2
 
 # Add models to path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'models'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from models.maunet import create_maunet_model
 from models.maunet_error_aware import create_maunet_error_aware_model
 
@@ -288,16 +288,16 @@ def main():
                        help='Use sophisticated post-processing like original saltfish team')
     
     # Model type
-    parser.add_argument('--model_type', type=str, default='maunet',
+    parser.add_argument('--model_type', type=str, default='maunet_error_aware',
                        choices=['maunet', 'maunet_error_aware'],
                        help='Type of MAUNet model to use')
     
     # Ensemble model paths
     parser.add_argument('--resnet50_path', type=str,
-                       default='./baseline/work_dir/maunet(Normal)_3class/best_Dice_model.pth',
+                       default='./baseline/work_dir/maunet_error_aware_resnet50_3class/best_Dice_model.pth',
                        help='Path to ResNet50 MAUNet checkpoint')
     parser.add_argument('--wideresnet50_path', type=str,
-                       default='./baseline/work_dir/maunet(Wide)_3class/best_Dice_model.pth',
+                       default='./baseline/work_dir/maunet_error_aware_wideresnet_3class/best_Dice_model.pth',
                        help='Path to Wide-ResNet50 MAUNet checkpoint')
     
     args = parser.parse_args()
@@ -447,11 +447,16 @@ def main():
                 # Simple post-processing
                 # Use interior class (class 1) for segmentation
                 prob_map = seg_probs[1] if args.num_class > 1 else seg_probs[0]
-                binary_mask = prob_map > 0.5
+                
+                # Use higher threshold for error-aware models due to different probability distributions
+                threshold = 0.75 if args.model_type == "maunet_error_aware" else 0.5
+                binary_mask = prob_map > threshold
                 
                 # Remove small objects and label connected components
+                # Use larger min_size for error-aware models to reduce over-segmentation
+                min_size = 32 if args.model_type == "maunet_error_aware" else 16
                 binary_mask = morphology.remove_small_objects(
-                    morphology.remove_small_holes(binary_mask), 16
+                    morphology.remove_small_holes(binary_mask), min_size
                 )
                 final_mask = measure.label(binary_mask).astype(np.uint16)
             

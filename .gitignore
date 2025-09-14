@@ -69,3 +69,32 @@ events.out.tfevents.*
 synthesis/datasets/
 synthesis/checkpoints/
 synthesis/results/
+
+# Local-only directories
+thesis_visuals/
+archive/
+
+# Test predictions and results (keep local, don't upload)
+test_predictions/lstmunet/
+test_predictions/maunet_ea_ensemble_adaptive_v1/
+test_predictions/maunet_ensemble/
+test_predictions/maunet_resnet50/
+test_predictions/maunet_wide/
+test_predictions/nnunet/
+test_predictions/sac/
+test_predictions/synthetic_maunet_ea_ensemble/
+test_predictions/unet/
+test_predictions/*.pdf
+test_predictions/*.png
+
+# Error analysis results
+error_analysis/results/
+error_analysis/logs/
+
+# Synthesis augmentation results
+synthesis_augmentation_study/final_augmentation_results/
+synthesis_augmentation_study/datasets/
+synthesis_augmentation_study/*.png
+
+# Visualization results
+visualization_results/

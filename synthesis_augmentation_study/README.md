@@ -26,7 +26,7 @@ This study evaluates the effectiveness of synthetic data augmentation for micros
 ### Methodology
 
 - **Model**: nnU-Net (best baseline)
-- **Training**: 5 epochs per run, 3 seeds (0,1,2)
+- **Training**: 20 epochs per run, 3 seeds (0,1,2)
 - **Evaluation**: Real test set, paired statistical analysis
 - **Metrics**: Dice, IoU, Precision, Recall, Boundary F1, HD95
 

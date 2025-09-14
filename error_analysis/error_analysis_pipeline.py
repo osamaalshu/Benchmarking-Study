@@ -35,34 +35,29 @@ except ImportError:
     from analysis_config import *
 
 def _read_instance_map(path: Path, logger=None) -> np.ndarray:
-    """Safely read instance labels preserving all instance IDs"""
+    """Safely read instance labels using same approach as benchmarking study"""
     if logger is None:
         logger = logging.getLogger(__name__)
         
     try:
-        # Read with proper dtype preservation
+        # Read with same approach as benchmarking study
         if path.suffix.lower() in {'.tif', '.tiff'}:
             arr = tiff.imread(str(path))
         else:
             arr = np.array(Image.open(path))
         
-        # Check for potential 8-bit truncation
-        if arr.dtype == np.uint8 and arr.max() > 250:
-            logger.warning(f"{path.name}: uint8 with high labels ({arr.max()}); verify no truncation.")
-        
-        # Ensure integer type
+        # Ensure integer type (same as benchmarking)
         if not np.issubdtype(arr.dtype, np.integer):
-            logger.debug(f"Converting {path.name} from {arr.dtype} to int32")
             arr = arr.astype(np.int32)
         
-        # Relabel to contiguous 1..K (keeps 0 for background)
-        original_max = arr.max()
-        arr = fastremap.renumber(arr, in_place=True)[0]
+        # Use same relabeling as benchmarking study
+        from skimage import segmentation
+        arr, _, _ = segmentation.relabel_sequential(arr)
         
         unique_labels = np.unique(arr)
         n_instances = len(unique_labels[unique_labels > 0])
         
-        logger.debug(f"{path.name}: {n_instances} instances (original max: {original_max}, relabeled max: {arr.max()})")
+        logger.debug(f"{path.name}: {n_instances} instances (max: {arr.max()})")
         
         return arr
         
@@ -70,8 +65,61 @@ def _read_instance_map(path: Path, logger=None) -> np.ndarray:
         logger.error(f"Error reading {path}: {e}")
         return None
 
+# Import StarDist evaluation functions (same as benchmarking study)
+from numba import jit
+
+@jit(nopython=True)
+def _label_overlap(x, y):
+    """Fast function to get pixel overlaps between masks in x and y (StarDist method)"""
+    x = x.ravel()
+    y = y.ravel()
+    
+    # preallocate a 'contact map' matrix
+    overlap = np.zeros((1+x.max(),1+y.max()), dtype=np.uint)
+    
+    # loop over the labels in x and add to the corresponding
+    # overlap entry. If label A in x and label B in y share P
+    # pixels, then the resulting overlap is P
+    for i in range(len(x)):
+        overlap[x[i],y[i]] += 1
+    return overlap
+
+def _intersection_over_union(masks_true, masks_pred):
+    """Intersection over union of all mask pairs (StarDist method)"""
+    overlap = _label_overlap(masks_true, masks_pred)
+    n_pixels_pred = np.sum(overlap, axis=0, keepdims=True)
+    n_pixels_true = np.sum(overlap, axis=1, keepdims=True)
+    iou = overlap / (n_pixels_pred + n_pixels_true - overlap)
+    iou[np.isnan(iou)] = 0.0
+    return iou
+
+def _true_positive(iou, th):
+    """True positive at threshold th (StarDist method)"""
+    n_min = min(iou.shape[0], iou.shape[1])
+    costs = -(iou >= th).astype(float) - iou / (2*n_min)
+    true_ind, pred_ind = linear_sum_assignment(costs)
+    match_ok = iou[true_ind, pred_ind] >= th
+    tp = match_ok.sum()
+    return tp
+
+def eval_tp_fp_fn(masks_true, masks_pred, threshold=0.5):
+    """Evaluate TP/FP/FN using StarDist method (identical to benchmarking)"""
+    num_inst_gt = np.max(masks_true)
+    num_inst_seg = np.max(masks_pred)
+    if num_inst_seg > 0:
+        iou = _intersection_over_union(masks_true, masks_pred)[1:, 1:]
+        tp = _true_positive(iou, threshold)
+        fp = num_inst_seg - tp
+        fn = num_inst_gt - tp
+    else:
+        tp = 0
+        fp = 0
+        fn = 0
+    return tp, fp, fn
+
 def _iou_matrix(gt, pr):
-    """Compute IoU matrix and return intersections/areas for IoGT/IoPred calculations"""
+    """Compute IoU matrix using StarDist method (for compatibility with splits/merges)"""
+    # Use StarDist evaluation but return format compatible with splits/merges analysis
     gt_ids = np.unique(gt)
     gt_ids = gt_ids[gt_ids > 0]
     pr_ids = np.unique(pr) 
@@ -84,32 +132,21 @@ def _iou_matrix(gt, pr):
         empty_pr_areas = np.zeros(len(pr_ids), dtype=np.int64)
         return gt_ids, pr_ids, empty_iou, empty_inter, empty_gt_areas, empty_pr_areas
 
-    # Flatten once
+    # Use StarDist IoU calculation
+    iou_full = _intersection_over_union(gt, pr)
+    iou = iou_full[1:, 1:]  # Remove background
+    
+    # Calculate areas and intersections for splits/merges analysis
     gt_flat = gt.ravel()
     pr_flat = pr.ravel()
-
-    # Build id->index maps
-    gt_map = {k: i for i, k in enumerate(gt_ids)}
-    pr_map = {k: j for j, k in enumerate(pr_ids)}
-
-    # --- INTERSECTIONS (sparse contingency over pixels where both > 0) ---
-    both_pos = (gt_flat > 0) & (pr_flat > 0)
-    rows = np.fromiter((gt_map[g] for g in gt_flat[both_pos]), count=both_pos.sum(), dtype=np.int32)
-    cols = np.fromiter((pr_map[p] for p in pr_flat[both_pos]), count=both_pos.sum(), dtype=np.int32)
-    M = sparse.coo_matrix((np.ones_like(rows, dtype=np.int32), (rows, cols)),
-                          shape=(len(gt_ids), len(pr_ids))).tocsr()
-    intersections = M.toarray().astype(np.int64)
-
-    # --- AREAS (true per-label pixel counts) ---
     gt_area_counts = np.bincount(gt_flat, minlength=int(gt_flat.max()) + 1)
     pr_area_counts = np.bincount(pr_flat, minlength=int(pr_flat.max()) + 1)
     gt_areas = gt_area_counts[gt_ids].astype(np.int64)
     pr_areas = pr_area_counts[pr_ids].astype(np.int64)
-
-    # --- IoU ---
-    unions = gt_areas[:, None] + pr_areas[None, :] - intersections
-    with np.errstate(divide='ignore', invalid='ignore'):
-        iou = np.where(unions > 0, intersections / unions, 0.0).astype(np.float32)
+    
+    # Calculate intersections from IoU
+    unions = gt_areas[:, None] + pr_areas[None, :] - (iou * (gt_areas[:, None] + pr_areas[None, :]))
+    intersections = (iou * (gt_areas[:, None] + pr_areas[None, :] - unions)).astype(np.int64)
 
     return gt_ids, pr_ids, iou, intersections, gt_areas, pr_areas
 
@@ -175,9 +212,26 @@ class ErrorAnalysisDataLoader:
 class ErrorAnalyzer:
     """Error analyzer focusing on key metrics"""
     
-    def __init__(self, logger=None, min_instance_size=10):
+    def __init__(self, logger=None, min_instance_size=10, remove_boundary_cells=True):
         self.logger = logger or logging.getLogger(__name__)
         self.min_instance_size = min_instance_size
+        self.remove_boundary_cells = remove_boundary_cells
+    
+    def _remove_boundary_cells(self, mask):
+        """Remove cells touching image boundaries (consistent with benchmarking study)"""
+        W, H = mask.shape
+        bd = np.ones((W, H))
+        bd[2:W-2, 2:H-2] = 0  # 2-pixel margin
+        bd_cells = np.unique(mask * bd)
+        
+        # Remove boundary cells
+        for i in bd_cells[1:]:  # Skip 0 (background)
+            mask[mask == i] = 0
+            
+        # Relabel sequentially
+        from skimage import segmentation
+        new_label, _, _ = segmentation.relabel_sequential(mask)
+        return new_label
     
     def _filter_small_instances(self, instance_map, min_size):
         """Filter out instances smaller than min_size pixels"""
@@ -233,28 +287,48 @@ class ErrorAnalyzer:
             raise ValueError(f"Shape mismatch: GT {gt_instances.shape} vs Pred {pred_instances.shape}")
         
         # 1) Matching on filtered maps (stable TP/FP/FN & PQ)
-        gt_match = self._filter_small_instances(gt_instances, self.min_instance_size)
-        pr_match = self._filter_small_instances(pred_instances, self.min_instance_size)
-
-        gt_ids_m, pr_ids_m, iou_matrix, _, _, _ = _iou_matrix(gt_match, pr_match)
-
-        if iou_matrix.size == 0:
-            tp, fp, fn = 0, len(pr_ids_m), len(gt_ids_m)
-            matched_ious = np.array([])
+        # Apply boundary cell removal if enabled (consistent with benchmarking study)
+        if self.remove_boundary_cells:
+            gt_match = self._remove_boundary_cells(gt_instances.copy())
+            pr_match = self._remove_boundary_cells(pred_instances.copy())
         else:
-            cost_matrix = 1.0 - iou_matrix
-            row_idx, col_idx = linear_sum_assignment(cost_matrix)
-            valid = iou_matrix[row_idx, col_idx] >= iou_threshold
-            mgt = set(row_idx[valid]); mpr = set(col_idx[valid])
-            tp = len(mgt)
-            fn = len(gt_ids_m) - len(mgt)
-            fp = len(pr_ids_m) - len(mpr)
-            matched_ious = iou_matrix[row_idx[valid], col_idx[valid]] if tp > 0 else np.array([])
+            gt_match = gt_instances.copy()
+            pr_match = pred_instances.copy()
+        
+        # Then apply size filtering
+        gt_match = self._filter_small_instances(gt_match, self.min_instance_size)
+        pr_match = self._filter_small_instances(pr_match, self.min_instance_size)
+
+        # Use StarDist evaluation method (identical to benchmarking)
+        tp, fp, fn = eval_tp_fp_fn(gt_match, pr_match, threshold=iou_threshold)
+        
+        # For PQ calculation, we need IoU values of matched instances
+        if tp > 0:
+            # Get IoU matrix for matched instances
+            gt_ids_m, pr_ids_m, iou_matrix, _, _, _ = _iou_matrix(gt_match, pr_match)
+            if iou_matrix.size > 0:
+                # Use same matching as StarDist
+                cost_matrix = 1.0 - iou_matrix
+                row_idx, col_idx = linear_sum_assignment(cost_matrix)
+                valid = iou_matrix[row_idx, col_idx] >= iou_threshold
+                matched_ious = iou_matrix[row_idx[valid], col_idx[valid]]
+            else:
+                matched_ious = np.array([])
+        else:
+            matched_ious = np.array([])
 
         # 2) Splits/Merges on unfiltered maps (keep fragments)
+        # Apply boundary cell removal for consistency if enabled
+        if self.remove_boundary_cells:
+            gt_splits = self._remove_boundary_cells(gt_instances.copy())
+            pr_splits = self._remove_boundary_cells(pred_instances.copy())
+        else:
+            gt_splits = gt_instances.copy()
+            pr_splits = pred_instances.copy()
+        
         gt_ids_s, pr_ids_s, _, inter, gt_areas, pr_areas = _iou_matrix(
-            self._filter_small_instances(gt_instances, 1),
-            self._filter_small_instances(pred_instances, 1)
+            self._filter_small_instances(gt_splits, 1),
+            self._filter_small_instances(pr_splits, 1)
         )
 
         if inter.size == 0:
@@ -645,14 +719,15 @@ def setup_logging():
     
     return logging.getLogger(__name__)
 
-def run_error_analysis():
+def run_error_analysis(remove_boundary_cells=True):
     """Run error analysis on all 101 test images"""
     logger = setup_logging()
     logger.info("Starting Instance-Aware Error Analysis...")
+    logger.info(f"Boundary cell removal: {'ENABLED' if remove_boundary_cells else 'DISABLED'}")
     
     # Initialize components
     data_loader = ErrorAnalysisDataLoader(logger)
-    error_analyzer = ErrorAnalyzer(logger, min_instance_size=10)
+    error_analyzer = ErrorAnalyzer(logger, min_instance_size=10, remove_boundary_cells=remove_boundary_cells)
     
     # Get test images
     test_image_list = data_loader.get_test_image_list()
@@ -768,12 +843,12 @@ def run_error_analysis():
     logger.info(f"Saved summary to {summary_path}")
     
     # Generate final report
-    generate_final_report(summary_df, results_dir, logger)
+    generate_final_report(summary_df, results_dir, logger, remove_boundary_cells)
     
     logger.info(f"Error analysis complete! Processed {len(all_results)} images")
     return all_results, summary_df
 
-def generate_final_report(summary_df, results_dir, logger):
+def generate_final_report(summary_df, results_dir, logger, remove_boundary_cells=True):
     """Generate comprehensive final report with metrics and findings"""
     
     logger.info("Generating final report...")
@@ -913,7 +988,8 @@ def generate_final_report(summary_df, results_dir, logger):
         f.write(f"- Total images analyzed: {len(summary_df['image'].unique())}\n")
         f.write(f"- Models evaluated: {', '.join(summary_df['model'].unique())}\n")
         f.write(f"- Minimum instance size: 10 pixels\n")
-        f.write(f"- IoU threshold: 0.5\n\n")
+        f.write(f"- IoU threshold: 0.5\n")
+        f.write(f"- Boundary cell removal: {'ENABLED' if remove_boundary_cells else 'DISABLED'}\n\n")
         
         f.write("## Key Findings\n\n")
         
@@ -960,4 +1036,16 @@ def generate_final_report(summary_df, results_dir, logger):
     logger.info(f"Comprehensive visualization saved to {report_path}")
 
 if __name__ == "__main__":
-    run_error_analysis()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Run error analysis with boundary cell removal option')
+    parser.add_argument('--no-boundary-removal', action='store_true', 
+                       help='Disable boundary cell removal (default: enabled)')
+    
+    args = parser.parse_args()
+    
+    # Run with boundary cell removal enabled by default (consistent with benchmarking)
+    remove_boundary_cells = not args.no_boundary_removal
+    
+    print(f"Running error analysis with boundary cell removal: {'ENABLED' if remove_boundary_cells else 'DISABLED'}")
+    run_error_analysis(remove_boundary_cells=remove_boundary_cells)

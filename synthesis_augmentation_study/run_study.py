@@ -9,7 +9,7 @@ Usage:
     python augmentation_study/run_study.py [options]
 
 Example:
-    python augmentation_study/run_study.py --models nnunet --epochs 5 --device mps
+    python augmentation_study/run_study.py --models nnunet --epochs 20 --device mps
 """
 
 import os
@@ -35,22 +35,22 @@ def parse_arguments():
     # Data configuration
     parser.add_argument(
         "--train-data-dir", 
-        default="data/train-preprocessed",
+        default="../data/train-preprocessed",
         help="Directory containing training data"
     )
     parser.add_argument(
         "--val-data-dir",
-        default="data/val", 
+        default="../data/val", 
         help="Directory containing validation data"
     )
     parser.add_argument(
         "--test-data-dir",
-        default="data/test",
+        default="../data/test",
         help="Directory containing test data"
     )
     parser.add_argument(
         "--synthetic-data-dir",
-        default="synthesis/synthetic_data_500",
+        default="synthetic_data_500",
         help="Directory containing synthetic data"
     )
     
@@ -74,7 +74,7 @@ def parse_arguments():
     parser.add_argument(
         "--epochs",
         type=int,
-        default=5,
+        default=20,
         help="Number of training epochs per run"
     )
     parser.add_argument(
@@ -195,13 +195,8 @@ def validate_prerequisites(config):
         else:
             print(f"   ✅ {name}: {dir_path}")
     
-    # Check augmentation study code
-    study_dir = Path("augmentation_study")
-    if not study_dir.exists():
-        print(f"   ❌ Augmentation study code: {study_dir} - MISSING!")
-        return False
-    else:
-        print(f"   ✅ Augmentation study code: {study_dir}")
+    # Check augmentation study code (we're already in the correct directory)
+    print(f"   ✅ Augmentation study code: synthesis_augmentation_study")
     
     print("✅ All prerequisites satisfied!")
     return True
@@ -234,7 +229,7 @@ def print_study_overview(config):
     
     # Expected runtime
     num_runs = len(config['models']) * 5 * len(config['seeds'])  # 5 arms
-    estimated_time = num_runs * 5 * config['max_epochs'] / 60  # ~5 min per epoch
+    estimated_time = num_runs * 5 * config['max_epochs'] / 60  # ~5 min per epoch (20 epochs default)
     
     print("⏱️ Expected Runtime:")
     print(f"   • Total training runs: {num_runs}")
